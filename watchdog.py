@@ -83,6 +83,28 @@ def check_booth():
     return code == "200", f"booth UI http={code}"
 
 
+def check_booth_data():
+    """Assert the endpoint the SCREEN reads, not just the index page.
+
+    `/` is a static file read and answers 200 even when the app came up
+    misconfigured. /api/state is what every panel renders from, and it must
+    carry a document list and a records host or the booth is blank/unusable.
+    This check exists because `/`-only monitoring reported green for 30
+    minutes while the demo was dead.
+    """
+    rc, out = on(BOOTH_NODE,
+                 "curl -s --max-time 8 http://127.0.0.1:8500/api/state")
+    try:
+        d = json.loads(out)
+    except Exception:
+        return False, f"booth /api/state not JSON ({out.strip()[:40]})"
+    if not d.get("documents"):
+        return False, "booth /api/state has no documents"
+    if not d.get("records_host"):
+        return False, "booth /api/state has no records host (started without its env)"
+    return True, f"booth data ok ({len(d['documents'])} docs, {len(d.get('nodes') or [])} nodes)"
+
+
 def check_retrieval():
     code = http(RETRIEVAL_NODE, "http://127.0.0.1:8700/health")
     return code == "200", f"retrieval http={code}"
@@ -101,10 +123,19 @@ def repair_route():
 
 
 def repair_booth():
-    on(BOOTH_NODE, "cd ~/booth && fuser -k 8500/tcp 2>/dev/null; sleep 1; "
-                   "nohup ~/booth/.venv/bin/python booth_app.py > /tmp/booth.log 2>&1 & disown", 40)
+    # Restart through the SAME env the start path uses. An earlier version ran
+    # a bare `python booth_app.py`, which dropped BOOTH_NODES/BOOTH_RECORDS_HOST
+    # and brought the app back with an empty roster and no records host: `/`
+    # answered 200 (so this check and `demo.sh check` both went green) while
+    # every data endpoint the screen reads returned 500. demo.sh writes the
+    # same values to ~/.config/environment.d/booth.conf -- source them here so
+    # there is ONE definition of how the booth app starts.
+    on(BOOTH_NODE,
+       "cd ~/booth && fuser -k 8500/tcp 2>/dev/null; sleep 1; "
+       "set -a; [ -f ~/.config/environment.d/booth.conf ] && . ~/.config/environment.d/booth.conf; set +a; "
+       "nohup ~/booth/.venv/bin/python booth_app.py > /tmp/booth.log 2>&1 & disown", 40)
     time.sleep(8)
-    return http(BOOTH_NODE, "http://127.0.0.1:8500/") == "200", "restarted booth app"
+    return check_booth_data()[0], "restarted booth app"
 
 
 def repair_retrieval():
@@ -128,12 +159,14 @@ def repair_verifier():
 # doing either automatically mid-visit makes a recoverable glitch worse.
 # They are REPORTED with the exact fix instead.
 CHECKS = [
-    ("model",     check_model,     None,             "bash demo.sh start   (model reload ~8 min)"),
-    ("route",     check_route,     repair_route,     None),
-    ("sandbox",   check_sandbox,   None,             f"nemoclaw {SBX} destroy --yes && bash setup-agent.sh"),
-    ("booth",     check_booth,     repair_booth,     None),
-    ("retrieval", check_retrieval, repair_retrieval, None),
-    ("verifier",  check_verifier,  repair_verifier,  None),
+    ("model",     check_model,      None,             "bash demo.sh start   (model reload ~8 min)"),
+    ("route",     check_route,      repair_route,     None),
+    ("sandbox",   check_sandbox,    None,             f"nemoclaw {SBX} destroy --yes && bash setup-agent.sh"),
+    ("booth",     check_booth,      repair_booth,     None),
+    # The data endpoint, not the index page -- see check_booth_data().
+    ("booth-data", check_booth_data, repair_booth,    None),
+    ("retrieval", check_retrieval,  repair_retrieval, None),
+    ("verifier",  check_verifier,   repair_verifier,  None),
 ]
 
 

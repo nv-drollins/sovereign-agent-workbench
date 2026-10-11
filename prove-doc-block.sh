@@ -15,7 +15,18 @@ export PATH="$HOME/.local/bin:$PATH"
 SBX="${1:-sovereign-agent}"
 RIP="${2:?need the records-repository IP as arg 2}"
 PORT="${3:-8900}"
-POLICY="${POLICY:-/tmp/records-policy.yaml}"
+# Render the policy ourselves rather than depending on a /tmp file a previous
+# run happened to leave behind -- /tmp does NOT survive a reboot, and the
+# committed template carries a __RECORDS_HOST__ placeholder that nemoclaw
+# rejects (while still exiting 0, so the restore fails silently).
+TEMPLATE="${TEMPLATE:-$HOME/booth/records-policy.yaml}"
+POLICY="${POLICY:-/tmp/records-policy.rendered.yaml}"
+if [ -f "$TEMPLATE" ]; then
+  sed "s/__RECORDS_HOST__/$RIP/" "$TEMPLATE" > "$POLICY"
+elif [ ! -f "$POLICY" ]; then
+  echo "FAIL: no policy template at $TEMPLATE and no rendered policy at $POLICY" >&2
+  exit 2
+fi
 X="timeout -k 5 90 openshell sandbox exec --name $SBX --no-tty --timeout 60 --"
 
 probe() { $X curl -s -o /dev/null -w '%{http_code}' --max-time 20 \

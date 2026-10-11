@@ -174,6 +174,24 @@ check|status)
   [ "$c" = "200" ] && ok "verifier         (${VERIFY_NODE%%.*}:8800)" || bad "verifier HTTP ${c:-000}"
   c="$(_http "$BOOTH_NODE" http://127.0.0.1:8500/)"
   [ "$c" = "200" ] && ok "booth UI         http://$BOOTH_NODE:8500" || bad "booth UI HTTP ${c:-000}"
+  # `/` is a static file read and answers 200 even when the app started without
+  # its environment. /api/state is what every panel on the screen renders from.
+  # Assert the DATA, or this board goes green over a blank booth.
+  sd="$(on "$BOOTH_NODE" "curl -s --max-time 8 http://127.0.0.1:8500/api/state" 2>/dev/null)"
+  # Parse in a FILE-free one-liner but never with `set --`: that would clobber
+  # the script's own positional parameters inside this case branch.
+  read -r b_docs b_nodes b_rec <<<"$(printf '%s' "$sd" | python3 -c 'import json,sys
+try:
+    d = json.load(sys.stdin)
+    print(len(d.get("documents") or []), len(d.get("nodes") or []), d.get("records_host") or "-")
+except Exception:
+    print("0 0 -")' 2>/dev/null)"
+  if [ "${b_docs:-0}" -gt 0 ] && [ "${b_rec:--}" != "-" ]; then
+    ok "booth data       ${b_docs} documents · ${b_nodes} nodes · records ${b_rec}"
+  else
+    bad "booth data       /api/state incomplete (docs=${b_docs:-0} nodes=${b_nodes:-0} records=${b_rec:--})"
+    inf "fix: bash demo.sh restart   (app started without BOOTH_NODES/BOOTH_RECORDS_HOST)"
+  fi
   ph="$(_phase)"
   [ "$ph" = "Ready" ] && ok "agent sandbox    ($SBX: Ready)" \
     || bad "agent sandbox phase=${ph:-missing} -> $0 recover"

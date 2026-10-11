@@ -144,7 +144,15 @@ def _node_telemetry(host: str) -> dict:
 
 
 def collect_telemetry(max_age: float = 3.0) -> list[dict]:
-    """Cached so a 1 Hz booth poll doesn't hammer SSH."""
+    """Cached so a 1 Hz booth poll doesn't hammer SSH.
+
+    An EMPTY roster must return [] rather than raise: ThreadPoolExecutor
+    rejects max_workers=0, and that exception took out /api/state and
+    /api/telemetry -- every data endpoint the booth screen reads -- while
+    `/` still answered 200 and every health check stayed green.
+    """
+    if not NODES:
+        return []
     if time.time() - _tele_cache["t"] < max_age and _tele_cache["nodes"]:
         return _tele_cache["nodes"]
     with __import__("concurrent.futures").futures.ThreadPoolExecutor(max_workers=len(NODES)) as ex:
@@ -353,6 +361,26 @@ RECORDS_URL = f"http://{RECORDS_HOST}:{RECORDS_PORT}"
 RECORDS_POLICY = os.environ.get("BOOTH_RECORDS_POLICY", os.path.expanduser("~/booth/records-policy.yaml"))
 
 
+def render_records_policy() -> str:
+    """Substitute the host placeholder and return a path nemoclaw can accept.
+
+    The COMMITTED template carries `__RECORDS_HOST__`, never a real address.
+    Handing that file to `policy-add --trusted-private-host <ip>` fails with
+    "does not match an endpoint in the custom preset input" -- and nemoclaw
+    exits 0 while doing it, so the grant silently does nothing and the demo
+    stays revoked. demo.sh renders it the same way; keep the two in step.
+    """
+    src = Path(RECORDS_POLICY)
+    text = src.read_text()
+    if "__RECORDS_HOST__" not in text:
+        return str(src)                     # already rendered
+    if not RECORDS_HOST:
+        raise RuntimeError("BOOTH_RECORDS_HOST is unset; cannot render the records policy")
+    out = Path("/tmp/records-policy.rendered.yaml")
+    out.write_text(text.replace("__RECORDS_HOST__", RECORDS_HOST))
+    return str(out)
+
+
 def _agent_can_read_docs() -> tuple[bool, str]:
     """Ask the AGENT ITSELF whether it can reach the records repository."""
     rc, out = sandbox_exec(
@@ -391,10 +419,16 @@ async def set_access(action: str):
         await asyncio.to_thread(nemoclaw,
             [SANDBOX, "policy-remove", "records-repository", "--yes"], 120)
     else:
+        policy = await asyncio.to_thread(render_records_policy)
         await term(f"$ nemoclaw {SANDBOX} policy-add --from-file records-policy.yaml --yes", "cmd")
-        await asyncio.to_thread(nemoclaw,
-            [SANDBOX, "policy-add", "--from-file", RECORDS_POLICY,
+        rc, out = await asyncio.to_thread(nemoclaw,
+            [SANDBOX, "policy-add", "--from-file", policy,
              "--trusted-private-host", RECORDS_HOST, "--yes"], 150)
+        # nemoclaw exits 0 on a refused policy, so the exit code proves nothing.
+        # Surface its own refusal text instead of letting the grant fail silently.
+        first = " ".join((out or "").split())[:160]
+        if first and "Failed" in first:
+            await term(f"< {first}", "err")
 
     ok, code = await asyncio.to_thread(_agent_can_read_docs)
     S.policy_on = ok
