@@ -39,7 +39,7 @@ model just breaks the agent and proves nothing.
 | head + worker | reasoning model, tensor-parallel across two nodes |
 | retrieval | BM25 passage search over the corpus |
 | records repository | documents served over HTTP, every read audited |
-| verifier | checks each quoted span against the source text |
+| verifier | checks each quoted span against the source text (service runs; **not yet called by the booth app**) |
 | booth | Hermes agent sandbox, web UI, live telemetry |
 | watchdog | repairs what it safely can, reports the rest |
 
