@@ -84,6 +84,23 @@ PHASE="$(on "openshell sandbox list 2>/dev/null | grep '^$SBX '" 2>/dev/null \
         | sed 's/\x1b\[[0-9;]*m//g' | tr -s ' ' | rev | cut -d' ' -f1 | rev | tr -d '[:space:]')"
 [ "$PHASE" = "Ready" ] && ok "sandbox Ready" || { bad "sandbox phase: ${PHASE:-missing}"; }
 
+# Onboarding installs convenience presets for public package registries
+# (pypi, npm, brew, huggingface). They are NOT needed by this demo and they
+# open 13 public internet hosts -- including github.com and
+# raw.githubusercontent.com via `brew`.
+#
+# A sovereignty pitch does not survive `policy-explain` showing four open
+# registries, and that page is exactly what a security-minded visitor asks to
+# see. Strip them on every onboard, or a sandbox REBUILD silently reinstates
+# them. Verified afterwards: the agent still executes Python fine without PyPI
+# (nothing is installed at runtime), and all containment beats still pass.
+echo "=== removing onboarding's public-registry grants ==="
+for _p in pypi npm brew huggingface; do
+  on "nemoclaw '$SBX' policy-remove $_p --yes" >/dev/null 2>&1 \
+    && inf "removed preset: $_p" || true
+  sleep 2
+done
+
 echo "=== egress policy (deny-by-default; allow ONLY inference) ==="
 POLICY=/tmp/sovereign-policy.yaml
 on "cat > $POLICY <<'YAML'

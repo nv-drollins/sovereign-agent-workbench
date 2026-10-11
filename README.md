@@ -46,6 +46,11 @@ model just breaks the agent and proves nothing.
 Containment is enforced four ways, verified by measurement: forced proxy, no
 DNS, no route out, and TLS interception so policy can match method and path.
 
+The agent holds exactly **two** grants — the records repository and the local
+model. Onboarding's default package-registry presets (pypi, npm, brew,
+huggingface — 13 public hosts including github.com) are stripped by
+`setup-agent.sh` on every onboard, and `demo.sh check` asserts they stay gone.
+
 ---
 
 ## Quick start

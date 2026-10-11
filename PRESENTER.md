@@ -119,6 +119,24 @@ Press **Prove containment**. Live, not pre-recorded:
 > "Deny by default. The only thing on the allow list is the model in this room
 > and the records service — and you just watched me take that one away."
 
+**If they ask to see the permission list** (the best question you'll get), show
+them on the operator machine:
+
+```bash
+nemoclaw sovereign-agent policy-explain
+```
+
+It prints exactly two active grants: the records repository and the local
+inference endpoint. Worth saying out loud:
+
+> "The onboarding tooling installs convenience access to PyPI, npm, Homebrew and
+> Hugging Face by default — thirteen public hosts, including GitHub. We stripped
+> all four. The agent doesn't install anything at runtime, so it loses nothing,
+> and this list is the one I'd want to hand an authorizing official."
+
+`bash demo.sh check` has a permanent **agent permissions** line asserting this,
+because a sandbox rebuild silently puts those grants back.
+
 ### Beat 6 — The close
 
 > "Everything you saw ran on these three machines. The documents never left,

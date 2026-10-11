@@ -209,6 +209,18 @@ except Exception:
   ph="$(_phase)"
   [ "$ph" = "Ready" ] && ok "agent sandbox    ($SBX: Ready)" \
     || bad "agent sandbox phase=${ph:-missing} -> $0 recover"
+  # The permission list is a DEMO-VISIBLE surface: a visitor asks to see it,
+  # and onboarding re-adds public-registry presets on every sandbox rebuild.
+  # Four open registries on screen undercuts the whole containment pitch.
+  extra="$(on "$BOOTH_NODE" "nemoclaw $SBX policy-list 2>/dev/null" 2>/dev/null \
+           | sed 's/\x1b\[[0-9;]*m//g' | grep '●' \
+           | grep -oE '(pypi|npm|brew|huggingface|github|personal-open-internet)' | sort -u | tr '\n' ' ')"
+  if [ -z "$extra" ]; then
+    ok "agent permissions  only the records repo + the local model"
+  else
+    bad "agent permissions  public egress grants present: $extra"
+    inf "fix: on $BOOTH_NODE run: for p in $extra; do nemoclaw $SBX policy-remove \$p --yes; done"
+  fi
   if [ -n "$MODEL_FABRIC_IP" ]; then
     c="$(_http "$BOOTH_NODE" http://172.18.0.1:8000/v1/models)"
     [ "$c" = "200" ] && ok "sandbox->model   (policy route)" \
