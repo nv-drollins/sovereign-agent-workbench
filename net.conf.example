@@ -1,0 +1,30 @@
+# Cluster fabric configuration.
+#
+# Copy to net.conf and edit for YOUR site. net.conf is gitignored -- never
+# commit real addresses or hostnames.
+#
+# Use ssh_config aliases or <hostname>.local names. The example values below
+# are RFC 5737 documentation addresses and will not work anywhere.
+
+# Every node in the cluster, space separated.
+NODES="node-a.local node-b.local node-c.local"
+
+# The /24 prefixes used by the point-to-point fabric links (first three
+# octets only). FORWARD-accept rules are installed for each.
+FABRIC_SUBNETS="192.168.10 192.168.11 192.168.12 192.168.13 192.168.14 192.168.15"
+
+# One reachable fabric address per node -- used to verify the mesh is up.
+FABRIC_PROBE="192.0.2.10 192.0.2.11 192.0.2.12"
+
+# Static routes per node: "<dest-cidr> <gateway>", one per line.
+# A node needs a route for every fabric subnet it is NOT directly attached to,
+# via a neighbour that IS on that subnet.
+#
+# Variable name is ROUTES_<shortname> with dashes replaced by underscores,
+# e.g. host "node-a.local" -> ROUTES_node_a
+ROUTES_node_a="192.0.2.0/24 192.0.2.1
+198.51.100.0/24 192.0.2.1"
+
+ROUTES_node_b="203.0.113.0/24 198.51.100.1"
+
+ROUTES_node_c="192.0.2.0/24 198.51.100.2"

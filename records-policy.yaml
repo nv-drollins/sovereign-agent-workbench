@@ -1,0 +1,20 @@
+preset:
+  name: records-repository
+  description: "Agent access to the records repository (document reads only)"
+
+network_policies:
+  records-repository:
+    name: records-repository
+    endpoints:
+      - host: __RECORDS_HOST__   # substituted by setup; never commit a real address
+        port: 8900
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: { method: GET, path: "/api/docs" }
+          - allow: { method: GET, path: "/api/docs/*" }
+          - allow: { method: GET, path: "/health" }
+    binaries:
+      - { path: /usr/bin/curl }
+      - { path: /usr/bin/python3* }
+      - { path: /opt/hermes/.venv/bin/python3* }

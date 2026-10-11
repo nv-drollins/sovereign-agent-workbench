@@ -1,0 +1,13 @@
+# site-specific configuration — never commit
+net.conf
+cluster.conf
+node-macs.txt
+
+# run artefacts
+cold-boot-*.log
+*.log
+ab-results.json
+bundle/
+__pycache__/
+.venv/
+*.pyc

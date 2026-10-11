@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sovereign Agent Workbench</title>
+<style>
+  /* Booth legibility: readable from ~2 m, no pulsing/flashing (explicit user
+     preference). Motion is limited to a slow progress shimmer. */
+  :root{
+    --bg:#0b0f0c; --panel:#121a14; --line:#1f2d23;
+    --green:#76b900; --green-dim:#4e7a00;
+    --text:#e8f0e6; --muted:#8fa392; --red:#d4453a; --amber:#d99a00;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+       background:var(--bg);color:var(--text);overflow:hidden}
+  .wrap{display:grid;grid-template-rows:auto 1fr auto;height:100vh}
+
+  header{display:flex;align-items:center;gap:18px;padding:14px 26px;
+         border-bottom:1px solid var(--line);background:var(--panel)}
+  header h1{margin:0;font-size:22px;letter-spacing:.3px}
+  header .sub{color:var(--muted);font-size:13px}
+  .pill{flex-wrap:wrap;justify-content:flex-end}
+  .pill{margin-left:auto;display:flex;gap:10px;align-items:center}
+  .chip{border:1px solid var(--line);border-radius:999px;padding:6px 14px;
+        font-size:13px;color:var(--muted);white-space:nowrap}
+  .chip b{color:var(--green)}
+
+  main{display:grid;grid-template-columns:minmax(230px,260px) minmax(0,1fr) minmax(270px,310px);
+       gap:12px;padding:14px 16px;min-height:0;overflow:hidden}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+        padding:14px;display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden}
+  .card h2{margin:0 0 10px;font-size:13px;text-transform:uppercase;
+           letter-spacing:1.3px;color:var(--muted);font-weight:600}
+
+  .doc{border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin-bottom:9px;
+       cursor:pointer;transition:border-color .15s,background .15s}
+  .doc:hover{border-color:var(--green-dim);background:#16211a}
+  .doc.sel{border-color:var(--green);background:#16211a}
+  .doc .t{font-size:15px;font-weight:600}
+  .doc .m{font-size:12px;color:var(--muted);margin-top:3px}
+
+  .askbox{margin-top:10px;border:1px solid var(--line);border-radius:9px;padding:10px}
+  .asklbl{font-size:11px;text-transform:uppercase;letter-spacing:.9px;color:var(--muted);
+          font-weight:600;margin-bottom:7px}
+  #askq{width:100%;box-sizing:border-box;background:#0f1711;color:var(--text);
+        border:1px solid var(--line);border-radius:7px;padding:8px 9px;
+        font:13px/1.45 inherit;resize:vertical;min-height:46px;max-height:140px}
+  #askq:focus{outline:none;border-color:var(--green-dim)}
+  .askrow{display:flex;align-items:center;gap:8px;margin-top:7px}
+  .askcount{flex:1;font-size:10.5px;color:var(--muted)}
+  .askrow button{padding:6px 12px;font-size:12px}
+  .q.custom{border-color:var(--green);background:#16211a}
+
+  .q{border:1px solid var(--line);border-radius:9px;padding:10px 13px;margin-bottom:8px;
+     cursor:pointer;font-size:14px;transition:border-color .15s,background .15s}
+  .q:hover{border-color:var(--green-dim);background:#16211a}
+
+  /* live data-flow diagram: shows WHERE things are and WHAT is moving */
+  .flow{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:12px;
+        background:#0f1711}
+    /* one row, one baseline, connectors that actually touch the boxes */
+  .hub{display:flex;align-items:stretch;gap:0;width:100%}
+  .hub > .fbox{flex:1 1 0;min-width:0;min-height:86px;
+               display:flex;flex-direction:column;justify-content:center}
+  /* connector: a line that spans the gap and meets both boxes, with its
+     caption sitting ON the line rather than floating below it */
+  /* connector: a painted rule that spans the gap, caption sitting on it */
+  /* Connectors must read at 2 m. A 2px rule does not -- it looked absent in a
+     visual check even though it painted. Thick line + explicit arrowhead so
+     DIRECTION is unambiguous, and a hard barrier on the blocked hop. */
+  /* Caption sits ABOVE the line. Measured bug: a centred caption was exactly
+     as wide as the connector (65px of 65px), leaving -10px of visible line --
+     the arrows looked absent in a visual check while the DOM said they painted. */
+  .conn{position:relative;flex:0 0 78px;align-self:center;height:40px}
+  .conn .cap{position:absolute;left:50%;transform:translateX(-50%);top:0;
+             font-size:10px;color:var(--muted);white-space:nowrap;line-height:1}
+  .conn.shut .cap{color:var(--red);font-weight:700}
+  .conn::before{content:"";position:absolute;left:2px;right:14px;top:26px;
+                height:5px;background:#33463a;border-radius:3px;transition:background .35s}
+  .conn::after{content:"";position:absolute;right:0;top:20px;
+               border-left:14px solid #33463a;border-top:8px solid transparent;
+               border-bottom:8px solid transparent;transition:border-color .35s}
+  .conn.on::before{background:var(--green)}
+  .conn.on::after{border-left-color:var(--green)}
+  /* blocked hop: DASHED line, no arrowhead, and a bold break mark */
+  .conn.shut::before{background:repeating-linear-gradient(90deg,
+                     var(--red) 0 9px, transparent 9px 14px)}
+  .conn.shut::after{border-left-color:transparent}
+  .conn .brk{display:none}
+  .conn.shut .brk{display:block;position:absolute;left:50%;top:18px;
+                  transform:translateX(-50%);color:var(--red);font-size:21px;
+                  font-weight:700;line-height:1;background:var(--panel);padding:0 3px}
+  .fbox.centre{border-color:var(--green);background:#16211a;padding:13px 12px}
+  .fbox .fs.ok{color:var(--green);font-size:10px;margin-top:3px}
+  .fbox{position:relative;border:1px solid var(--line);border-radius:9px;padding:11px 10px 9px;
+        text-align:center;transition:border-color .3s, background .3s}
+  .gate .gsub{font-size:9.5px;color:var(--muted);letter-spacing:.3px}
+  .flowhead{margin-top:11px;text-align:center;font-size:17px;font-weight:700;line-height:1.3}
+  .flowlegend{margin-top:5px;font-size:11px;color:var(--muted);text-align:center}
+  .flowlegend b{color:var(--text)}
+  .fbox.on{border-color:var(--green);background:#16211a}
+  .fbox .ft{font-size:12.5px;font-weight:600;line-height:1.25;overflow-wrap:anywhere}
+  .fbox .fs{font-size:10.5px;color:var(--muted);margin-top:2px;line-height:1.35}
+  .farrow{font-size:17px;color:#2a3a2e;transition:color .3s}
+  .farrow.on{color:var(--green)}
+  .fblocked{margin-top:10px;display:flex;align-items:center;gap:9px;font-size:12px;
+            border:1px dashed #3a2320;border-radius:8px;padding:8px 10px;color:var(--muted)}
+  .fblocked .x{color:var(--red);font-weight:700;font-size:14px}
+  .fblocked.hit{border-color:var(--red);background:#1d100f;color:var(--text)}
+
+  /* the policy gate sits ON the arrow between sandbox and model */
+  .gate{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+        flex:0 0 96px;min-height:86px;border:1px solid var(--line);border-radius:9px;
+        padding:8px 6px;background:#0f1711;transition:border-color .3s,background .3s}
+  .gate.open{border-color:var(--green)}
+  .gate.shut{border-color:var(--red);background:#1d100f}
+  .gate.work{border-color:var(--amber)}
+  .gate .lock{font-size:19px;line-height:1}
+  .gate .lbl{font-size:10px;letter-spacing:.4px;text-transform:uppercase;font-weight:700}
+  .gate.open  .lbl{color:var(--green)}
+  .gate.shut  .lbl{color:var(--red)}
+  .gate.work  .lbl{color:var(--amber)}
+  .gate .code{font-size:10.5px;color:var(--muted);font-family:ui-monospace,monospace}
+  .fbox.denied{border-color:var(--red);background:#1d100f}
+  .fbox.denied .ft{color:var(--red)}
+  /* narration line under the diagram -- replaces the separate step list */
+  .fnarr{margin-top:9px;font-size:12.5px;color:var(--text);min-height:18px}
+  .fnarr .muted{color:var(--muted)}
+  .fprog{height:3px;background:var(--line);border-radius:2px;margin-top:7px;overflow:hidden;display:none}
+  .fprog.on{display:block}
+  .fprog i{display:block;height:100%;width:30%;background:var(--green);
+           animation:slide 2.2s linear infinite}
+
+  /* live session terminal: real commands + real HTTP codes from the run */
+  /* flex-basis alone was being compressed by the sibling stage (190px basis
+     rendered at 71px). min-height is what actually holds the size. */
+  .term{margin-top:10px;border:1px solid var(--line);border-radius:10px;background:#070b08;
+        display:flex;flex-direction:column;flex:0 0 auto;position:relative;
+        height:190px;min-height:90px;max-height:60vh}
+  .term.collapsed{height:34px;min-height:34px}
+  .term.collapsed .body{display:none}
+  /* drag handle: booth operators resize with the mouse, no keyboard needed */
+  .term .grip{position:absolute;top:-4px;left:0;right:0;height:9px;cursor:ns-resize;z-index:3}
+  .term .grip::after{content:"";position:absolute;top:3px;left:50%;transform:translateX(-50%);
+                     width:46px;height:3px;border-radius:2px;background:#2a3a2e}
+  .term .grip:hover::after{background:var(--green-dim)}
+  .tbtn{margin-left:auto;display:flex;gap:4px}
+  .tbtn button{padding:1px 8px;font-size:11px;border-radius:5px;line-height:1.5}
+  .term .tbar{display:flex;align-items:center;gap:7px;padding:6px 11px;
+              border-bottom:1px solid var(--line);font-size:11px;color:var(--muted)}
+  .term .dot{width:9px;height:9px;border-radius:50%;background:#2a3a2e}
+  .term .dot.live{background:var(--green)}
+  .term .body{flex:1;overflow:auto;padding:8px 11px;
+              font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace}
+  .term .body div{white-space:pre-wrap;word-break:break-word}
+  .term .ts{color:#4a5a4e;margin-right:7px}
+  .term .cmd{color:var(--green)}
+  .term .out{color:#9fb3a4}
+  .term .ok{color:var(--green)}
+  .term .err{color:var(--red)}
+  .term .note{color:var(--amber)}
+
+  #stage{flex:1 1 auto;overflow:auto;min-height:90px}
+  .idle{display:flex;flex-direction:column;align-items:center;justify-content:center;
+        min-height:120px;text-align:center;gap:10px;color:var(--muted);padding:10px 0}
+  .idle .big{font-size:22px;color:var(--text);max-width:24ch;line-height:1.3}
+  .idle .hint{font-size:16px}
+
+  .phase{display:flex;align-items:center;gap:11px;font-size:17px;margin-bottom:14px}
+  .dot{width:11px;height:11px;border-radius:50%;background:var(--green)}
+  .bar{height:3px;background:var(--line);border-radius:2px;overflow:hidden;margin-bottom:16px}
+  .bar i{display:block;height:100%;width:38%;background:var(--green);
+         animation:slide 2.4s linear infinite}
+  @keyframes slide{from{transform:translateX(-100%)}to{transform:translateX(360%)}}
+
+  .answer{font-size:17px;line-height:1.65;white-space:pre-wrap}
+  .answer q,.answer .quote{color:var(--green)}
+  .feed{margin-top:14px;font-size:13px;color:var(--muted);border-top:1px solid var(--line);
+        padding-top:10px;max-height:118px;overflow:auto}
+  .feed div{margin-bottom:3px}
+
+
+  .accessbox{margin-top:12px;border:1px solid var(--line);border-radius:10px;padding:11px 12px}
+  .acctitle{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);
+            font-weight:600;margin-bottom:8px}
+  .accrow{display:flex;align-items:center;gap:10px}
+  .accstate{flex:1;font-size:14px;font-weight:700}
+  .accstate.on{color:var(--green)}
+  .accstate.off{color:var(--red)}
+  .accrow button{padding:8px 12px;font-size:12.5px;white-space:nowrap}
+  .acchint{font-size:11.5px;color:var(--muted);margin-top:8px;line-height:1.45}
+
+  .proof{display:flex;flex-direction:column;gap:9px}
+  .pr{display:flex;align-items:center;gap:9px;font-size:13px;
+      border:1px solid var(--line);border-radius:9px;padding:9px 11px}
+  .pr .s{font-weight:700;font-size:11px;padding:2px 8px;border-radius:5px}
+  .s.block{background:#2a1210;color:var(--red);border:1px solid var(--red)}
+  .s.allow{background:#14210c;color:var(--green);border:1px solid var(--green-dim)}
+
+  /* live cluster strip -- slow bar transitions only, no pulsing (booth rule) */
+  .cluster{display:grid;grid-template-columns:1fr;gap:9px;margin-top:10px}
+  .node{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#0f1711}
+  .node.busy{border-color:var(--green)}
+  .node .nm{font-size:13px;font-weight:600;display:flex;align-items:center;gap:7px}
+  .node .nm .led{width:8px;height:8px;border-radius:50%;background:#2a3a2e}
+  .node.busy .nm .led{background:var(--green)}
+  .node .role{font-size:11px;color:var(--muted);margin:2px 0 7px}
+  .met{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-top:7px}
+  .met .lbl{width:36px;font-weight:600}
+  .met .track{flex:1;display:block;height:14px;background:#13201a;border-radius:7px;
+              overflow:hidden;border:1px solid #23362b;min-width:60px}
+  /* MUST be block: a <span> defaults to display:inline, which IGNORES
+     width/height -- the bar renders 0x0 while style.width says "96%". */
+  .met .fill{display:block;height:14px;background:var(--green);
+             width:0%;transition:width .9s ease;border-radius:6px}
+  .met .val{width:48px;text-align:right;color:var(--text);font-weight:700;font-size:13px}
+
+  footer{display:flex;gap:12px;align-items:center;padding:12px 24px;
+         border-top:1px solid var(--line);background:var(--panel)}
+  button{font:inherit;font-size:15px;padding:11px 22px;border-radius:9px;cursor:pointer;
+         border:1px solid var(--green-dim);background:#16211a;color:var(--text)}
+  button.primary{background:var(--green);border-color:var(--green);color:#0b0f0c;font-weight:700}
+  button:disabled{opacity:.42;cursor:not-allowed}
+  .ledger{margin-left:auto;display:flex;gap:22px;font-size:13px;color:var(--muted)}
+  .ledger b{display:block;font-size:21px;color:var(--text);font-weight:700}
+  .ledger .zero b{color:var(--green)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Sovereign Agent Workbench</h1>
+    <span class="sub">AI that reads sensitive documents — without the data ever leaving this room</span>
+    <div class="pill">
+      <span class="chip">model <b id="model">…</b></span>
+      <span class="chip">sandbox <b id="sbx">…</b></span>
+      <span class="chip" id="net">egress <b>locked</b></span>
+    </div>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>1 · Pick a document</h2>
+      <div id="docs"></div>
+      <h2 style="margin-top:14px">2 · Pick a question</h2>
+      <div id="qs"></div>
+      <div class="askbox">
+        <div class="asklbl">…or type your own</div>
+        <textarea id="askq" rows="2" maxlength="300"
+          placeholder="Ask anything about the selected document"></textarea>
+        <div class="askrow">
+          <span class="askcount" id="askcount">0/300</span>
+          <button id="askbtn" onclick="useCustom()">Use this question</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>The agent at work</h2>
+      <div class="flow">
+        <div class="hub">
+          <div class="fbox" id="f-model">
+            <div class="ft">◆ Reasoning model</div>
+            <div class="fs" id="f-model-sub">2 Sparks (TP=2)</div>
+            <div class="fs ok">always reachable</div>
+          </div>
+
+          <div class="conn" id="link-model"><span class="cap">reasons on</span></div>
+
+          <div class="fbox centre" id="f-sbx">
+            <div class="ft">▣ Agent sandbox</div>
+            <div class="fs"><span id="f-sbx-host">—</span></div>
+            <div class="fs">non-root · no DNS · no route out</div>
+          </div>
+
+          <div class="conn" id="link-gate"><span class="cap">must pass</span><span class="brk">✕</span></div>
+
+          <div class="gate" id="gate">
+            <span class="lock" id="gate-icon">🔓</span>
+            <span class="lbl" id="gate-lbl">allowed</span>
+            <span class="code" id="gate-code"></span>
+            <span class="gsub">NemoClaw policy</span>
+          </div>
+
+          <div class="conn" id="link-doc"><span class="brk">✕</span></div>
+
+          <div class="fbox" id="f-doc">
+            <div class="ft">▤ Records repository</div>
+            <div class="fs"><span id="f-doc-host">—</span> · :8900</div>
+            <div class="fs">every read audited</div>
+          </div>
+        </div>
+        <div class="flowhead" id="f-head">Model: <span style="color:var(--green)">reachable</span> &nbsp;·&nbsp; Records: <span style="color:var(--green)">allowed &amp; audited</span></div>
+        <div class="flowlegend">
+          The agent is the only thing that makes calls — the policy gate sits on
+          the path to the records repository, not on the model.
+        </div>
+        <div class="fnarr" id="f-narr"><span class="muted">idle — pick a document and press Run</span></div>
+        <div class="fprog" id="f-prog"><i></i></div>
+      <div id="stage">
+        <div class="idle">
+          <div class="big">Every document, every answer, stays on this desk.</div>
+          <div class="hint">Pick a document and a question on the left, then press Run.</div>
+        </div>
+      </div>
+      <div class="term">
+        <div class="grip" id="tgrip" title="drag to resize"></div>
+        <div class="tbar"><span class="dot" id="tdot"></span>
+          <span>live session — <span id="t-host">—</span> · <span id="t-sbx">sandbox</span></span>
+          <span class="tbtn">
+            <button onclick="termSize(-70)" title="smaller">−</button>
+            <button onclick="termSize(70)" title="bigger">+</button>
+            <button onclick="termToggle()" id="tcollapse" title="collapse">▾</button>
+          </span></div>
+        <div class="body" id="tbody"><div class="out">waiting for activity…</div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Containment — proven live</h2>
+      <div class="proof" id="proof">
+        <div class="pr"><span class="s block">?</span> not yet tested</div>
+      </div>
+      <button style="margin-top:12px" onclick="prove()">Test what it can reach</button>
+      <div class="accessbox">
+        <div class="acctitle">Agent's access to the records repository</div>
+        <div class="accrow">
+          <span class="accstate" id="accstate">checking…</span>
+          <button id="accbtn" onclick="toggleAccess()">…</button>
+        </div>
+        <div class="acchint" id="acchint">Revoke it, then press Run — the agent
+          will tell you it cannot read the file.</div>
+      </div>
+      <div style="margin-top:14px;font-size:12.5px;color:var(--muted);line-height:1.5">
+        The agent runs as a non-root user in its own container with
+        <b>deny-by-default</b> network egress. It is permitted exactly one
+        destination: the model on this machine.
+      </div>
+      <h2 style="margin-top:16px">Cluster — live</h2>
+      <div class="cluster" id="cluster"></div>
+    </section>
+  </main>
+
+  <footer>
+    <button class="primary" id="run" onclick="run()">Run the agent</button>
+    <button onclick="reset()">Reset</button>
+    <div class="ledger">
+      <div><span>words generated locally</span><b id="tok">0</b></div>
+      <div><span>runs</span><b id="runs">0</b></div>
+      <div class="zero"><span>bytes sent to any cloud</span><b id="eg">0</b></div>
+    </div>
+  </footer>
+</div>
+
+<script>
+const QUESTIONS = [
+  "What are the three most important deadlines, and what happens if each is missed?",
+  "What dollar thresholds trigger an approval or an audit?",
+  "Summarise the findings and the actions required, with the time limit on each.",
+  "What does this document NOT tell me that I would need to know?"
+];
+let DOC=null, Q=QUESTIONS[0], busy=false, CUSTOM=null;
+
+async function load(){
+  const s = await (await fetch('/api/state',{cache:'no-store'})).json();
+  document.getElementById('model').textContent = s.model || '—';
+  const sub=document.getElementById('f-model-sub');
+  if(sub && s.topology) sub.textContent = s.topology;
+  const dh=document.getElementById('f-doc-host');
+  if(dh && s.records_host) dh.textContent = s.records_host;
+  const sh=document.getElementById('f-sbx-host');
+  if(sh && s.sandbox && s.sandbox.node) sh.textContent = s.sandbox.node;
+  const th=document.getElementById('t-host');
+  if(th && s.sandbox && s.sandbox.node) th.textContent = s.sandbox.node;
+  const ts=document.getElementById('t-sbx');
+  if(ts && s.sandbox && s.sandbox.name) ts.textContent = s.sandbox.name;
+  document.getElementById('sbx').textContent = (s.sandbox && s.sandbox.container) || '—';
+  document.getElementById('tok').textContent = s.ledger.tokens.toLocaleString();
+  document.getElementById('runs').textContent = s.ledger.runs;
+  document.getElementById('eg').textContent = s.ledger.bytes_egressed;
+
+  const dd = document.getElementById('docs'); dd.innerHTML='';
+  s.documents.forEach((d,i)=>{
+    if(!DOC && i===0) DOC=d.id;
+    const el=document.createElement('div');
+    el.className='doc'+(d.id===DOC?' sel':'');
+    el.innerHTML=`<div class="t">${d.title}</div><div class="m">${d.words} words · synthetic</div>`;
+    el.addEventListener('click',()=>{DOC=d.id;load();});
+    dd.appendChild(el);
+  });
+  const qq=document.getElementById('qs'); qq.innerHTML='';
+  if(CUSTOM){
+    const el=document.createElement('div');
+    el.className='q custom'+(CUSTOM===Q?'':'');
+    el.style.borderColor = (CUSTOM===Q?'var(--green)':'');
+    el.innerHTML='<b>your question:</b> '+CUSTOM.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+    el.addEventListener('click',()=>{Q=CUSTOM;load();});
+    qq.appendChild(el);
+  }
+  QUESTIONS.forEach(q=>{
+    const el=document.createElement('div');
+    el.className='q'; el.style.borderColor = (q===Q?'var(--green)':'');
+    el.textContent=q;
+    el.addEventListener('click',()=>{Q=q;load();});   // listener, not inline onclick
+    qq.appendChild(el);
+  });
+  if(s.egress_proof && Object.keys(s.egress_proof).length) paintProof(s.egress_proof);
+  bindAsk(); bindGrip();
+}
+
+function paintProof(p){
+  const box=document.getElementById('proof'); box.innerHTML='';
+  for(const [k,v] of Object.entries(p)){
+    const blocked = v.blocked===true, allowed = v.allowed===true;
+    const el=document.createElement('div'); el.className='pr';
+    el.innerHTML=`<span class="s ${blocked?'block':'allow'}">${blocked?'BLOCKED':'ALLOWED'}</span>
+                  <span>${k}</span>`;
+    box.appendChild(el);
+  }
+  const anyBlocked = Object.values(p).some(v=>v.blocked);
+  document.getElementById('net').innerHTML = 'egress <b>'+(anyBlocked?'locked':'open')+'</b>';
+}
+
+async function run(){
+  if(busy||!DOC) return;
+  busy=true; document.getElementById('run').disabled=true;
+  const st=document.getElementById('stage');
+  st.innerHTML=`<div class="phase"><span class="dot"></span><span id="ph">Starting…</span></div>
+                <div class="bar"><i></i></div><div class="answer" id="ans"></div>
+                <div class="feed" id="feed"></div>`;
+  await fetch(`/api/run?doc=${encodeURIComponent(DOC)}&question=${encodeURIComponent(Q)}`,{method:'POST'});
+}
+
+async function prove(){ await fetch('/api/prove-egress',{method:'POST'}); }
+
+// The containment beat: real nemoclaw policy changes, real 403 from OpenShell.
+// Button disabled while in flight so a nervous operator cannot double-fire it.
+let ACCESS=null;
+
+// Manual access toggle. The ONLY thing we revoke is the agent's permission to
+// reach the RECORDS REPOSITORY -- never the model. Blocking the model would
+// just break the agent and prove nothing; blocking the documents shows
+// containment: it can still think, it simply cannot read what it is not
+// cleared for.
+async function refreshAccess(){
+  try{
+    const d=await (await fetch('/api/access',{cache:'no-store'})).json();
+    setAccessUI(d.doc_access, d.http);
+  }catch(e){}
+}
+function setAccessUI(granted, code){
+  ACCESS=granted;
+  const st=document.getElementById('accstate'), b=document.getElementById('accbtn');
+  if(st){ st.textContent = granted ? 'GRANTED' : 'REVOKED';
+          st.className = 'accstate '+(granted?'on':'off'); }
+  if(b){ b.textContent = granted ? 'Revoke access' : 'Grant access';
+         b.disabled = false; }
+  gateSet(granted?'open':'shut', code||'',
+    granted ? '<span class="muted">The agent may read case files from the records repository.</span>'
+            : '<b style="color:var(--red)">Document access revoked.</b> '+
+              '<span class="muted">Press Run — the agent still has its model, but cannot read the file.</span>');
+}
+async function toggleAccess(){
+  const b=document.getElementById('accbtn');
+  if(!b || b.disabled) return;
+  b.disabled=true; b.textContent='applying…';
+  gateSet('work','','<b>Changing the policy…</b> <span class="muted">this takes a few seconds</span>');
+  try{
+    const d=await (await fetch('/api/access/'+(ACCESS?'revoke':'grant'),{method:'POST'})).json();
+    setAccessUI(d.doc_access, d.http);
+  }catch(e){ b.disabled=false; refreshAccess(); }
+}
+
+// --- live flow diagram -------------------------------------------------
+// Driven by the SAME websocket events as the rest of the UI. Nothing here is
+// on a timer and nothing is faked.
+function flowSet(id,on){ const e=document.getElementById(id); if(e) e.classList.toggle('on',!!on); }
+function flowNarrate(t){ const n=document.getElementById('f-narr'); if(n) n.innerHTML=t; }
+function flowReset(){
+  ['f-doc','f-sbx','f-model'].forEach(i=>flowSet(i,false));
+  document.querySelectorAll('.conn').forEach(e=>e.classList.remove('on','shut'));
+  const d=document.getElementById('f-doc'); if(d) d.classList.remove('denied');
+  const p=document.getElementById('f-prog'); if(p) p.classList.remove('on');
+}
+function flowPhase(ph){
+  if(ph==='reading'){
+    flowSet('f-doc',1);
+    flowNarrate('<b>Requesting the case file</b> <span class="muted">— from the records repository</span>');
+  }
+  if(ph==='thinking'){
+    flowSet('f-sbx',1); flowSet('f-model',1);
+    mlink && mlink.classList.add('on');
+    flowNarrate('<b>Reasoning over the file</b> <span class="muted">— on the model sharded across 2 Sparks</span>');
+  }
+  if(ph==='proving'){
+    flowNarrate('<b>Testing what the agent can reach</b> <span class="muted">— live, not pre-recorded</span>');
+  }
+}
+
+function gateSet(state, code, narration){
+  const g=document.getElementById('gate'), i=document.getElementById('gate-icon'),
+        l=document.getElementById('gate-lbl'), c=document.getElementById('gate-code'),
+        doc=document.getElementById('f-doc'), sbx=document.getElementById('f-sbx'),
+        mdl=document.getElementById('f-model'),
+        n=document.getElementById('f-narr'), p=document.getElementById('f-prog');
+  if(!g) return;
+  const links=[document.getElementById('link-gate'),
+               document.getElementById('link-doc')].filter(Boolean);
+  const mlink=document.getElementById('link-model');
+  g.classList.remove('open','shut','work');
+  // the sandbox and its model are NEVER what gets cut off
+  sbx && sbx.classList.add('on');
+  mdl && mdl.classList.add('on');
+  mdl && mdl.classList.remove('denied');
+  mlink && mlink.classList.add('on');
+
+  if(state==='open'){ g.classList.add('open'); i.textContent='🔓'; l.textContent='allowed';
+    doc && doc.classList.remove('denied'); doc && doc.classList.add('on');
+    links.forEach(e=>{e.classList.add('on'); e.classList.remove('shut');});
+    const dft=doc && doc.querySelector('.ft');
+    if(dft) dft.innerHTML='▤ Records repository';
+    const hd=document.getElementById('f-head');
+    if(hd){ hd.innerHTML='Model: <span style="color:var(--green)">reachable</span> &nbsp;·&nbsp; Records: <span style="color:var(--green)">allowed &amp; audited</span>'; } }
+  if(state==='shut'){ g.classList.add('shut'); i.textContent='🔒'; l.textContent='blocked';
+    doc && doc.classList.add('denied'); doc && doc.classList.remove('on');
+    links.forEach(e=>{e.classList.remove('on'); e.classList.add('shut');});
+    const dft=doc && doc.querySelector('.ft');
+    if(dft) dft.innerHTML='▤ Records repository<br><span style="color:var(--red);font-size:10px">UNREACHABLE</span>';
+    const hd=document.getElementById('f-head');
+    if(hd){ hd.innerHTML='Model: <span style="color:var(--green)">reachable</span> &nbsp;·&nbsp; Records: <span style="color:var(--red)">blocked</span>'; } }
+  if(state==='work'){ g.classList.add('work'); i.textContent='⏳'; l.textContent='changing';
+    links.forEach(e=>e.classList.remove('on','shut')); }
+  if(c) c.textContent = code ? ('HTTP '+code) : '';
+  if(n && narration) n.innerHTML = narration;
+  if(p) p.classList.toggle('on', state==='work');
+}
+
+function policyStep(label, detail){
+  // map each backend step onto the diagram
+  const d = detail||'';
+  const code = (d.match(/HTTP (\d{3})/)||[])[1] || '';
+  if(/ALLOWED/.test(label))  return gateSet('open', code,
+      '<b>Allowed.</b> <span class="muted">The agent\'s request reached the model — '+d+'</span>');
+  if(/BLOCKED/.test(label))  return gateSet('shut', code,
+      '<b style="color:var(--red)">Blocked.</b> <span class="muted">Same agent, same question — '
+      +'OpenShell refused it at the policy proxy ('+d+')</span>');
+  if(/Revoking/.test(label)) return gateSet('work','',
+      '<b>Revoking the policy…</b> <span class="muted">'+d+'</span>');
+  if(/Restoring/.test(label))return gateSet('work','',
+      '<b>Restoring the policy…</b> <span class="muted">'+d+'</span>');
+  const n=document.getElementById('f-narr');
+  if(n) n.innerHTML = '<b>'+label.trim()+'</b> <span class="muted">'+d+'</span>';
+}
+
+function paintCluster(nodes){
+  const box=document.getElementById('cluster'); if(!box||!nodes) return;
+  box.innerHTML='';
+  nodes.forEach(n=>{
+    if(n.error){ const e=document.createElement('div'); e.className='node';
+      e.innerHTML=`<div class="nm"><span class="led"></span>${n.host}</div>
+                   <div class="role">unreachable</div>`; box.appendChild(e); return; }
+    const g=n.gpu||{}, m=n.memory||{}, v=n.vllm;
+    const busy=(g.sm_pct||0)>8 || (v&&v.running>0);
+    const el=document.createElement('div');
+    el.className='node'+(busy?' busy':'');
+    const role = v ? 'serving the model' : 'idle';
+    el.innerHTML=`
+      <div class="nm"><span class="led"></span>${n.host}</div>
+      <div class="role">${role} · ${g.temp_c?Math.round(g.temp_c)+'°C':''} ${g.power_w?Math.round(g.power_w)+'W':''}</div>
+      <div class="met"><span class="lbl">GPU</span><span class="track">
+        <span class="fill" style="width:${g.sm_pct||0}%"></span></span>
+        <span class="val">${g.sm_pct||0}%</span></div>
+      <div class="met"><span class="lbl">MEM</span><span class="track">
+        <span class="fill" style="width:${m.pct||0}%"></span></span>
+        <span class="val">${m.used_gb||0}G</span></div>`;
+    box.appendChild(el);
+  });
+}
+async function tele(){
+  try{
+    const d=await (await fetch('/api/telemetry',{cache:'no-store'})).json();
+    paintCluster(d.nodes);
+  }catch(e){}
+}
+// ---- custom question ---------------------------------------------------
+// Attendee-typed input: cap the length and strip control characters so a long
+// paste cannot blow out the booth layout. The agent is already contained by
+// policy, so this is about presentation, not security.
+function cleanQ(t){
+  return (t||'').replace(/[\u0000-\u001f\u007f]/g,' ').replace(/\s+/g,' ').trim().slice(0,300);
+}
+function useCustom(){
+  const ta=document.getElementById('askq');
+  const t=cleanQ(ta.value);
+  if(t.length < 8){ ta.focus(); ta.placeholder='Please type a longer question'; return; }
+  Q=t; CUSTOM=t; load();
+  ta.blur();
+}
+function bindAsk(){
+  const ta=document.getElementById('askq'), c=document.getElementById('askcount');
+  if(!ta || ta.dataset.bound) return;
+  ta.dataset.bound='1';
+  const upd=()=>{ if(c) c.textContent = `${ta.value.length}/300`; };
+  ta.addEventListener('input', upd);
+  // Enter submits, Shift+Enter makes a newline
+  ta.addEventListener('keydown', e=>{
+    if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); useCustom(); }
+  });
+  upd();
+}
+
+// ---- terminal sizing ---------------------------------------------------
+function termSize(delta){
+  const t=document.querySelector('.term'); if(!t) return;
+  t.classList.remove('collapsed');
+  const cur=Math.round(t.getBoundingClientRect().height);
+  const next=Math.max(90, Math.min(560, cur+delta));
+  t.style.height=next+'px';
+  try{ localStorage.setItem('termH', next); }catch(e){}
+}
+function termToggle(){
+  const t=document.querySelector('.term'), b=document.getElementById('tcollapse');
+  if(!t) return;
+  const collapsing = !t.classList.contains('collapsed');
+  if(collapsing){
+    // stash the current height: an inline style.height would otherwise
+    // override the .collapsed class and nothing would appear to happen
+    t.dataset.prevH = Math.round(t.getBoundingClientRect().height);
+    t.style.height='';
+    t.classList.add('collapsed');
+  } else {
+    t.classList.remove('collapsed');
+    if(t.dataset.prevH) t.style.height = t.dataset.prevH+'px';
+  }
+  if(b) b.textContent = collapsing ? '▴' : '▾';
+}
+function bindGrip(){
+  const g=document.getElementById('tgrip'), t=document.querySelector('.term');
+  if(!g || !t || g.dataset.bound) return;
+  g.dataset.bound='1';
+  let y0=0, h0=0, drag=false;
+  const down=e=>{ drag=true; y0=(e.touches?e.touches[0]:e).clientY;
+                  h0=t.getBoundingClientRect().height;
+                  document.body.style.userSelect='none'; e.preventDefault(); };
+  const move=e=>{ if(!drag) return;
+                  const y=(e.touches?e.touches[0]:e).clientY;
+                  const next=Math.max(90, Math.min(560, h0 + (y0-y)));
+                  t.classList.remove('collapsed'); t.style.height=next+'px'; };
+  const up=()=>{ if(!drag) return; drag=false; document.body.style.userSelect='';
+                 try{ localStorage.setItem('termH', parseInt(t.style.height)||190); }catch(e){} };
+  g.addEventListener('mousedown',down); g.addEventListener('touchstart',down,{passive:false});
+  window.addEventListener('mousemove',move); window.addEventListener('touchmove',move,{passive:false});
+  window.addEventListener('mouseup',up);   window.addEventListener('touchend',up);
+  try{ const sv=parseInt(localStorage.getItem('termH'));
+       if(sv) t.style.height=sv+'px'; }catch(e){}
+}
+
+function termLine(d){
+  const b=document.getElementById('tbody'); if(!b) return;
+  if(b.dataset.empty!=='0'){ b.innerHTML=''; b.dataset.empty='0'; }
+  const el=document.createElement('div');
+  el.innerHTML=`<span class="ts">${d.ts||''}</span>`+
+               `<span class="${d.kind||'out'}">${(d.line||'')
+                 .replace(/&/g,'&amp;').replace(/</g,'&lt;')}</span>`;
+  b.appendChild(el);
+  while(b.children.length>150) b.removeChild(b.firstChild);
+  b.scrollTop=b.scrollHeight;
+  const dot=document.getElementById('tdot');
+  if(dot){ dot.classList.add('live'); clearTimeout(window.__tdt);
+           window.__tdt=setTimeout(()=>dot.classList.remove('live'),2500); }
+}
+
+function reset(){
+  busy=false; document.getElementById('run').disabled=false;
+  document.getElementById('stage').innerHTML=
+    `<div class="idle"><div class="big">Every document, every answer, stays on this desk.</div>
+     <div class="hint">Pick a document and a question on the left, then press Run.</div></div>`;
+  flowReset();
+  gateSet('open','', '<span class="muted">idle — pick a document and press Run</span>');
+}
+
+// WebSocket keeps re-discovering; a booth screen runs for days, so never
+// tear the connection down permanently.
+function connect(){
+  const ws=new WebSocket(`ws://${location.host}/ws`);
+  ws.onmessage=e=>{
+    const d=JSON.parse(e.data);
+    const ph=document.getElementById('ph'), ans=document.getElementById('ans'),
+          feed=document.getElementById('feed');
+    if(d.type==='start'){ flowReset(); }
+    if(d.type==='phase'){ if(ph) ph.textContent=d.msg; flowPhase(d.phase); }
+    if(d.type==='tick'&&feed){ const x=document.createElement('div');
+      x.textContent='· '+d.msg; feed.appendChild(x); feed.scrollTop=1e6; }
+    if(d.type==='answer'){
+      if(ph) ph.textContent=`Answered in ${d.elapsed}s — entirely on this machine`;
+      document.querySelector('.bar')?.remove();
+      if(ans) ans.textContent=d.answer;
+      flowSet('f-sbx',1); gateSet('open','', '<b>Answered</b> <span class="muted">— '+
+        'the document, the model and the answer all stayed on these machines</span>');
+      busy=false; document.getElementById('run').disabled=false; load();
+    }
+    if(d.type==='error'){
+      if(ph) ph.textContent='That run did not complete';
+      document.querySelector('.bar')?.remove();
+      if(ans) ans.textContent=d.msg||'';
+      busy=false; document.getElementById('run').disabled=false;
+    }
+    if(d.type==='term') termLine(d);
+    if(d.type==='access_busy') gateSet('work','', '<b>'+d.msg+'</b>');
+    if(d.type==='access') setAccessUI(d.granted, d.http);
+    if(d.type==='fetch'){
+      const okf = d.http==='200';
+      gateSet(okf?'open':'shut', d.http,
+        okf ? '<b>Case file retrieved</b> <span class="muted">from the records repository — the read was audited</span>'
+            : '<b style="color:var(--red)">Refused</b> <span class="muted">HTTP '+d.http+
+              ' — the agent has no permission to read this document</span>');
+      flowSet('f-sbx',1); flowSet('f-model',1);
+    }
+    if(d.type==='denied'){
+      const ph2=document.getElementById('ph'), an2=document.getElementById('ans');
+      if(ph2) ph2.textContent='Blocked by policy — the agent could not read the document';
+      document.querySelector('.bar')?.remove();
+      if(an2) an2.textContent=d.msg||'';
+      busy=false; document.getElementById('run').disabled=false;
+    }
+    if(d.type==='egress'){
+      paintProof(d.proof);
+    }
+  };
+  ws.onclose=()=>setTimeout(connect,2000);
+}
+
+connect(); load(); tele(); refreshAccess(); setInterval(load, 15000); setInterval(tele, 2500); setInterval(refreshAccess, 20000);
+</script>
+</body>
+</html>
