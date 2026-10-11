@@ -34,7 +34,10 @@ BOOTH_PROFILE = os.environ.get("BOOTH_PROFILE", "booth")
 # No default roster: a baked-in list points a stranger's clone at this lab.
 # demo.sh exports BOOTH_NODES from net.conf.
 NODES = [n for n in os.environ.get("BOOTH_NODES", "").split(",") if n.strip()]
-TELEMETRY_SCRIPT = os.environ.get("BOOTH_TELEMETRY", "/tmp/telemetry.py")
+# install.sh deploys this to ~/rag/telemetry.py on every node. NEVER default it
+# into /tmp: a reboot wipes /tmp, every node then reports error:true, and the
+# cluster panel silently renders empty while all other checks stay green.
+TELEMETRY_SCRIPT = os.environ.get("BOOTH_TELEMETRY", os.path.expanduser("~/rag/telemetry.py"))
 DOCS = Path(os.environ.get("BOOTH_DOCS", str(Path(__file__).parent / "documents")))
 
 # Never cache: a stale booth page silently serves yesterday's UI.

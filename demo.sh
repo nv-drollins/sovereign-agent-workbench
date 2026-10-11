@@ -65,9 +65,23 @@ start_services(){
   # changed later, so DNAT it to wherever the model actually lives now.
   # Re-applied on every start because Docker flushes the nat table.
   [ -n "$MODEL_FABRIC_IP" ] && on "$BOOTH_NODE" "bash ~/booth/model-route.sh on $MODEL_FABRIC_IP" >/dev/null 2>&1
+  # Persist the booth app's environment ON THE BOOTH NODE before starting it.
+  # It used to be inlined on this ssh command line only, which meant ANY other
+  # restart path (the watchdog's repair, a hand-run nohup) brought the app back
+  # with an empty roster and no records host -- `/` still answered 200, so every
+  # check stayed green over a booth whose panels were blank. One file, one
+  # definition; the watchdog sources this same file.
+  #
+  # Build the file content LOCALLY and pipe it over stdin. Composing it inside
+  # the remote command string means every $( ) runs on the REMOTE side, where
+  # NODES is unset -- which silently produced BOOTH_NODES="".
+  local _nodes_csv; _nodes_csv="$(echo ${NODES:-} | tr ' ' ',')"
+  printf 'BOOTH_TOPOLOGY="%s"\nBOOTH_RECORDS_HOST="%s"\nBOOTH_NODES="%s"\nBOOTH_SELF_NODE="%s"\n' \
+    "$TOPOLOGY" "${RECORDS_FABRIC_IP:-}" "$_nodes_csv" "${BOOTH_NODE%%.*}" \
+    | ssh -o BatchMode=yes -o ConnectTimeout=8 "nvidia@$BOOTH_NODE" \
+        "mkdir -p ~/.config/environment.d && cat > ~/.config/environment.d/booth.conf" >/dev/null 2>&1
   on "$BOOTH_NODE" "cd ~/booth && fuser -k 8500/tcp 2>/dev/null; sleep 1; \
-    BOOTH_TOPOLOGY='$TOPOLOGY' BOOTH_RECORDS_HOST='${RECORDS_FABRIC_IP:-}' \
-    BOOTH_NODES='$(echo ${NODES:-} | tr " " ",")' BOOTH_SELF_NODE='${BOOTH_NODE%%.*}' \
+    set -a; . ~/.config/environment.d/booth.conf; set +a; \
     nohup ~/booth/.venv/bin/python booth_app.py > /tmp/booth.log 2>&1 & disown" >/dev/null 2>&1
 }
 

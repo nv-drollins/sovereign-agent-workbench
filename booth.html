@@ -217,6 +217,53 @@
              width:0%;transition:width .9s ease;border-radius:6px}
   .met .val{width:48px;text-align:right;color:var(--text);font-weight:700;font-size:13px}
 
+  /* ---- attract loop -------------------------------------------------- */
+  /* Runs itself between visitors. Booth rule: NO pulsing, flashing or looping
+     motion -- transitions are slow crossfades only. Everything rendered here
+     is REAL state pulled from /api/state; nothing on this overlay is mocked. */
+  .attract{position:fixed;inset:0;z-index:50;background:var(--bg);
+           display:flex;flex-direction:column;align-items:center;justify-content:center;
+           padding:60px;text-align:center;
+           opacity:0;visibility:hidden;transition:opacity 1.1s ease,visibility 1.1s}
+  .attract.on{opacity:1;visibility:visible}
+  .attract .slide{position:absolute;max-width:1180px;padding:0 40px;
+                  opacity:0;transition:opacity 1.1s ease;pointer-events:none}
+  .attract .slide.cur{opacity:1}
+  .attract h2{font-size:58px;line-height:1.14;margin:0 0 26px;letter-spacing:-.4px;
+              font-weight:700;color:var(--text);text-transform:none}
+  .attract h2 em{font-style:normal;color:var(--green)}
+  .attract p{font-size:27px;line-height:1.5;color:var(--muted);margin:0 auto;max-width:900px}
+  .attract .steps{display:flex;gap:26px;justify-content:center;margin-top:16px;flex-wrap:wrap}
+  .attract .step{flex:1 1 260px;max-width:320px;border:1px solid var(--line);
+                 border-radius:14px;padding:24px 22px;background:var(--panel);text-align:left}
+  .attract .step .n{font-size:13px;letter-spacing:1.4px;color:var(--green);
+                    font-weight:700;margin-bottom:10px}
+  .attract .step .s{font-size:21px;line-height:1.42;color:var(--text)}
+  .attract .facts{display:flex;gap:44px;justify-content:center;margin-top:34px;flex-wrap:wrap}
+  .attract .fact b{display:block;font-size:52px;color:var(--text);font-weight:700;line-height:1.1}
+  .attract .fact.zero b{color:var(--green)}
+  .attract .fact span{font-size:17px;color:var(--muted)}
+  .attract .quote{font-size:30px;line-height:1.5;color:var(--text);
+                  border-left:4px solid var(--green);padding-left:28px;text-align:left;
+                  max-width:960px;margin:0 auto}
+  .attract .qsrc{font-size:17px;color:var(--muted);margin-top:18px;text-align:left;
+                 max-width:960px;margin-left:auto;margin-right:auto;padding-left:32px}
+  .attract .nodes{display:flex;gap:18px;justify-content:center;margin-top:30px;flex-wrap:wrap}
+  .attract .nd{border:1px solid var(--line);border-radius:12px;padding:16px 22px;
+               background:var(--panel);min-width:210px}
+  .attract .nd .h{font-size:19px;font-weight:600;display:flex;align-items:center;
+                  gap:9px;justify-content:center}
+  .attract .nd .led{width:10px;height:10px;border-radius:50%;background:#2a3a2e}
+  .attract .nd.busy .led{background:var(--green)}
+  .attract .nd .r{font-size:15px;color:var(--muted);margin-top:6px}
+  .attract .cue{position:absolute;bottom:52px;font-size:21px;color:var(--muted);
+                letter-spacing:.3px}
+  .attract .cue b{color:var(--green);font-weight:600}
+  .attract .mark{position:absolute;top:44px;font-size:15px;color:var(--muted);
+                 letter-spacing:1.8px;text-transform:uppercase}
+  /* Progress of the current slide. A plain linear fill, no pulse. */
+  .attract .prog{position:absolute;bottom:0;left:0;height:3px;background:var(--green-dim)}
+
   footer{display:flex;gap:12px;align-items:center;padding:12px 24px;
          border-top:1px solid var(--line);background:var(--panel)}
   button{font:inherit;font-size:15px;padding:11px 22px;border-radius:9px;cursor:pointer;
@@ -352,6 +399,64 @@
       <div class="zero"><span>bytes sent to any cloud</span><b id="eg">0</b></div>
     </div>
   </footer>
+</div>
+
+<!-- Attract loop. Shown when the booth has been idle; any touch/key/click
+     dismisses it instantly. Content is built from REAL /api/state values. -->
+<div class="attract" id="attract">
+  <div class="mark" id="at-mark">synthetic documents · nothing leaves this room</div>
+
+  <div class="slide" data-slide="0">
+    <h2>Every document, every answer,<br><em>stays on this desk.</em></h2>
+    <p>An AI agent that reads sensitive documents and answers with every claim
+       quoted — running entirely on the hardware in front of you.</p>
+  </div>
+
+  <div class="slide" data-slide="1">
+    <h2>How it works</h2>
+    <div class="steps">
+      <div class="step"><div class="n">1 — RETRIEVE</div>
+        <div class="s">The agent requests a case file through a policy gate.
+          Every read is audited.</div></div>
+      <div class="step"><div class="n">2 — REASON</div>
+        <div class="s">A 120-billion-parameter model, split across two machines
+          in this booth, reads the file.</div></div>
+      <div class="step"><div class="n">3 — CITE</div>
+        <div class="s">Every claim comes back in quotes. If the document
+          doesn't say, the agent says so.</div></div>
+    </div>
+  </div>
+
+  <div class="slide" data-slide="2">
+    <h2>It cannot reach<br><em>what you did not grant it.</em></h2>
+    <p>Revoke its access to the records system and the same question returns a
+       refusal — in the agent's own words. It keeps its model. It simply has no
+       permission to read that file.</p>
+    <div class="facts">
+      <div class="fact"><b>403</b><span>enforced, not promised</span></div>
+      <div class="fact"><b id="at-deny">2s</b><span>to refuse</span></div>
+      <div class="fact zero"><b>0</b><span>bytes sent to any cloud</span></div>
+    </div>
+  </div>
+
+  <div class="slide" data-slide="3">
+    <h2>A real answer, from this room</h2>
+    <div class="quote" id="at-quote">—</div>
+    <div class="qsrc" id="at-qsrc"></div>
+  </div>
+
+  <div class="slide" data-slide="4">
+    <h2>Running right now</h2>
+    <div class="nodes" id="at-nodes"></div>
+    <div class="facts">
+      <div class="fact"><b id="at-model">—</b><span>model</span></div>
+      <div class="fact"><b id="at-runs">0</b><span>questions answered today</span></div>
+      <div class="fact zero"><b>0</b><span>bytes egressed</span></div>
+    </div>
+  </div>
+
+  <div class="cue"><b>Touch the screen</b> to ask it something</div>
+  <div class="prog" id="at-prog"></div>
 </div>
 
 <script>
@@ -700,6 +805,7 @@ function connect(){
       flowSet('f-sbx',1); gateSet('open','', '<b>Answered</b> <span class="muted">— '+
         'the document, the model and the answer all stayed on these machines</span>');
       busy=false; document.getElementById('run').disabled=false; load();
+      atLast=Date.now(); atRefresh();   // keep the idle screen's quote current
     }
     if(d.type==='error'){
       if(ph) ph.textContent='That run did not complete';
@@ -731,6 +837,120 @@ function connect(){
   };
   ws.onclose=()=>setTimeout(connect,2000);
 }
+
+// ---- attract loop ---------------------------------------------------------
+// Self-running idle screen. Rules it obeys:
+//  * NO pulsing/flashing/looping motion -- slow crossfades only (booth rule).
+//  * Every value it shows is REAL, pulled from /api/state. The "real answer"
+//    slide is skipped entirely until the booth has actually produced one,
+//    rather than showing a canned example -- a fabricated answer on an idle
+//    screen is the same lie as a fabricated line in the terminal pane.
+//  * It must never hijack a live run or an operator mid-click.
+const ATTRACT_IDLE_MS = 90000;   // idle before it takes over
+const ATTRACT_SLIDE_MS = 11000;  // per slide
+let atOn=false, atIdx=0, atTimer=null, atProgTimer=null, atLast=Date.now(), atAnswer=null;
+
+function atSlides(){ return [...document.querySelectorAll('#attract .slide')]; }
+
+// Slide 3 ("a real answer") is only eligible once a genuine answer exists.
+function atEligible(){
+  return atSlides().filter(s => s.dataset.slide !== '3' || atAnswer);
+}
+
+function atShowSlide(i){
+  const list = atEligible();
+  if(!list.length) return;
+  atIdx = ((i % list.length) + list.length) % list.length;
+  atSlides().forEach(s => s.classList.remove('cur'));
+  list[atIdx].classList.add('cur');
+  // restart the slide progress bar (linear, no pulse)
+  const p = document.getElementById('at-prog');
+  if(p){
+    p.style.transition='none'; p.style.width='0%';
+    clearTimeout(atProgTimer);
+    atProgTimer = setTimeout(()=>{
+      p.style.transition=`width ${ATTRACT_SLIDE_MS}ms linear`;
+      p.style.width='100%';
+    }, 40);
+  }
+}
+
+function atStart(){
+  if(atOn || busy) return;              // never cover a live run
+  atOn = true;
+  atRefresh();
+  document.getElementById('attract').classList.add('on');
+  atShowSlide(0);
+  clearInterval(atTimer);
+  atTimer = setInterval(()=>atShowSlide(atIdx+1), ATTRACT_SLIDE_MS);
+}
+
+function atStop(){
+  if(!atOn) return;
+  atOn = false;
+  clearInterval(atTimer); atTimer=null;
+  clearTimeout(atProgTimer);
+  document.getElementById('attract').classList.remove('on');
+  const p=document.getElementById('at-prog');
+  if(p){ p.style.transition='none'; p.style.width='0%'; }
+}
+
+// Pull the live values the overlay displays.
+async function atRefresh(){
+  try{
+    const s = await (await fetch('/api/state',{cache:'no-store'})).json();
+    const m=document.getElementById('at-model');
+    if(m) m.textContent = s.model || '—';
+    const r=document.getElementById('at-runs');
+    if(r) r.textContent = (s.ledger && s.ledger.runs) || 0;
+    const nb=document.getElementById('at-nodes');
+    if(nb && s.nodes){
+      nb.innerHTML='';
+      s.nodes.forEach(n=>{
+        if(n.error) return;
+        const g=n.gpu||{}, m=n.memory||{};
+        const busyN=(g.sm_pct||0)>8 || (n.vllm && n.vllm.running>0);
+        // A TP worker holds its half of the weights but runs no vLLM process
+        // of its own (`vllm` is null on the worker), so process presence
+        // UNDERSTATES the cluster. Resident memory is the honest signal:
+        // ~115G means this node is holding a shard.
+        const holding = (m.used_gb||0) > 60;
+        const role = (n.vllm || holding) ? 'holding the model' : 'supporting services';
+        const el=document.createElement('div');
+        el.className='nd'+((busyN||holding)?' busy':'');
+        el.innerHTML=`<div class="h"><span class="led"></span>${n.host}</div>
+                      <div class="r">${role}</div>`;
+        nb.appendChild(el);
+      });
+    }
+    // Only quote an answer the booth really produced.
+    if(s.run && s.run.status==='done' && s.run.answer){
+      const first = s.run.answer.split('\n').map(l=>l.replace(/^[-*\s]+/,'').trim())
+                      .filter(l=>l.length>40)[0];
+      if(first){
+        atAnswer = first.length>230 ? first.slice(0,227)+'…' : first;
+        const q=document.getElementById('at-quote'); if(q) q.textContent=atAnswer;
+        const src=document.getElementById('at-qsrc');
+        if(src) src.textContent = `— answered locally in ${Math.round(s.run.elapsed)}s from a synthetic case file`;
+      }
+    }
+  }catch(e){ /* an idle screen must never break on a transient fetch */ }
+}
+
+function atPoke(){
+  atLast = Date.now();
+  if(atOn) atStop();
+}
+
+function atTick(){
+  if(busy){ atLast = Date.now(); return; }   // a run in flight is not idle
+  if(!atOn && Date.now()-atLast > ATTRACT_IDLE_MS) atStart();
+  if(atOn) atRefresh();
+}
+
+['pointerdown','keydown','wheel','touchstart'].forEach(ev=>
+  window.addEventListener(ev, atPoke, {passive:true}));
+setInterval(atTick, 3000);
 
 connect(); load(); tele(); refreshAccess(); setInterval(load, 15000); setInterval(tele, 2500); setInterval(refreshAccess, 20000);
 </script>
