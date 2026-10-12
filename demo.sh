@@ -24,6 +24,7 @@ VERIFY_NODE="${VERIFY_NODE:-$HEAD}"
 RECORDS_NODE="${RECORDS_NODE:-$VERIFY_NODE}"
 BOOTH_NODE="${BOOTH_NODE:-$HEAD}"
 WATCHDOG_NODE="${WATCHDOG_NODE:-$VERIFY_NODE}"
+INTAKE_NODE="${INTAKE_NODE:-$RECORDS_NODE}"
 MODEL_FABRIC_IP="${MODEL_FABRIC_IP:-}"
 SBX="${SBX:-sovereign-agent}"
 TOPOLOGY="${BOOTH_TOPOLOGY:-2 Sparks (TP=2)}"
@@ -51,6 +52,13 @@ start_services(){
     nohup python3 verifier.py > /tmp/verify.log 2>&1 & disown" >/dev/null 2>&1
   on "$RECORDS_NODE" "cd ~/rag && fuser -k 8900/tcp 2>/dev/null; sleep 1; \
     DOCSVC_DIR=\$HOME/rag/documents nohup python3 docservice.py > /tmp/docsvc.log 2>&1 & disown" >/dev/null 2>&1
+  # Intake agent: parses an uploaded document into a catalogue entry using its
+  # OWN model on this node, so an intake never competes with the booth's
+  # answer path on the TP=2 cluster.
+  on "$INTAKE_NODE" "cd ~/rag && fuser -k 8600/tcp 2>/dev/null; sleep 1; \
+    INTAKE_MODEL_URL=http://127.0.0.1:${INTAKE_MODEL_PORT:-8001}/v1 \
+    INTAKE_MODEL_NAME=${INTAKE_MODEL_NAME:-intake-model} \
+    nohup python3 intake.py > /tmp/intake.log 2>&1 & disown" >/dev/null 2>&1
   # A backgrounded `&` over ssh dies with the connection, and `setsid nohup`
   # was not enough either. A systemd USER UNIT is the only form that reliably
   # survives ssh disconnect AND a reboot (with linger enabled).
@@ -76,8 +84,9 @@ start_services(){
   # the remote command string means every $( ) runs on the REMOTE side, where
   # NODES is unset -- which silently produced BOOTH_NODES="".
   local _nodes_csv; _nodes_csv="$(echo ${NODES:-} | tr ' ' ',')"
-  printf 'BOOTH_TOPOLOGY="%s"\nBOOTH_RECORDS_HOST="%s"\nBOOTH_NODES="%s"\nBOOTH_SELF_NODE="%s"\n' \
+  printf 'BOOTH_TOPOLOGY="%s"\nBOOTH_RECORDS_HOST="%s"\nBOOTH_NODES="%s"\nBOOTH_SELF_NODE="%s"\nBOOTH_INTAKE_URL="%s"\n' \
     "$TOPOLOGY" "${RECORDS_FABRIC_IP:-}" "$_nodes_csv" "${BOOTH_NODE%%.*}" \
+    "http://${INTAKE_NODE%%.*}.local:8600" \
     | ssh -o BatchMode=yes -o ConnectTimeout=8 "nvidia@$BOOTH_NODE" \
         "mkdir -p ~/.config/environment.d && cat > ~/.config/environment.d/booth.conf" >/dev/null 2>&1
   on "$BOOTH_NODE" "cd ~/booth && fuser -k 8500/tcp 2>/dev/null; sleep 1; \
@@ -102,7 +111,7 @@ start)
 stop)
   hr "stopping"
   bash "$HERE/cluster.sh" stop 2>&1 | tail -3 | sed 's/^/  /'
-  for n in "$RETRIEVAL_NODE:8700" "$VERIFY_NODE:8800" "$RECORDS_NODE:8900" "$BOOTH_NODE:8500"; do
+  for n in "$RETRIEVAL_NODE:8700" "$VERIFY_NODE:8800" "$RECORDS_NODE:8900" "$INTAKE_NODE:8600" "$BOOTH_NODE:8500"; do
     on "${n%%:*}" "fuser -k ${n##*:}/tcp 2>/dev/null" >/dev/null 2>&1
   done
   on "$WATCHDOG_NODE" "systemctl --user stop booth-watchdog.service 2>/dev/null; \
@@ -186,6 +195,21 @@ check|status)
   [ "$c" = "200" ] && ok "records repo     (${RECORDS_NODE%%.*}:8900)" || bad "records repo HTTP ${c:-000}"
   c="$(_http "$VERIFY_NODE" http://127.0.0.1:8800/health)"
   [ "$c" = "200" ] && ok "verifier         (${VERIFY_NODE%%.*}:8800)" || bad "verifier HTTP ${c:-000}"
+  # Intake agent + its own model. Both optional: the booth answers questions
+  # fine without them, only the upload beat needs them.
+  c="$(_http "$INTAKE_NODE" http://127.0.0.1:8600/health)"
+  if [ "$c" = "200" ]; then
+    mr="$(on "$INTAKE_NODE" "curl -s --max-time 6 http://127.0.0.1:8600/health" 2>/dev/null \
+          | grep -o '"model_ready": *true' || true)"
+    if [ -n "$mr" ]; then
+      ok "intake agent     (${INTAKE_NODE%%.*}:8600, model ready)"
+    else
+      warn "intake agent     (${INTAKE_NODE%%.*}:8600) up, but its model is NOT loaded"
+      inf "fix: bash serve-single.sh start $INTAKE_NODE \$INTAKE_MODEL_DIR intake-model 8001 0.80"
+    fi
+  else
+    warn "intake agent     not running — upload beat unavailable (answers still work)"
+  fi
   c="$(_http "$BOOTH_NODE" http://127.0.0.1:8500/)"
   [ "$c" = "200" ] && ok "booth UI         http://$BOOTH_NODE:8500" || bad "booth UI HTTP ${c:-000}"
   # `/` is a static file read and answers 200 even when the app started without

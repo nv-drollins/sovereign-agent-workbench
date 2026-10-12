@@ -331,6 +331,27 @@
   .gate:hover{border-color:var(--green)}
   .gate .hint{font-size:8.5px;color:var(--muted);letter-spacing:.2px;margin-top:1px}
 
+  /* ---- operator upload (adds a case file to the records repository) --- */
+  .upbox{margin-top:10px;border:1px dashed var(--line);border-radius:9px;padding:10px}
+  .upbox .uplbl{font-size:11px;text-transform:uppercase;letter-spacing:.9px;
+                color:var(--muted);font-weight:600;margin-bottom:7px}
+  .upbox .uprow{display:flex;gap:8px;align-items:center}
+  .upbox input[type=file]{display:none}
+  .upbox .upbtn{padding:7px 13px;font-size:12.5px;white-space:nowrap}
+  .upbox .upname{flex:1;min-width:0;font-size:11.5px;color:var(--muted);
+                 overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .upbox .upstat{margin-top:7px;font-size:11.5px;color:var(--muted);line-height:1.45}
+  .upbox .upstat.err{color:var(--red)}
+  .upbox .upstat.ok{color:var(--green)}
+  .doc.fresh{border-color:var(--green);background:#16211a}
+  .doc .badge{display:inline-block;font-size:9.5px;letter-spacing:.5px;
+              text-transform:uppercase;color:var(--green);border:1px solid var(--green-dim);
+              border-radius:999px;padding:1px 7px;margin-left:6px;vertical-align:1px}
+  .doc .sum{font-size:11.5px;color:var(--muted);margin-top:4px;line-height:1.4}
+  .q.sug{border-style:dashed}
+  .q .qtag{display:block;font-size:9.5px;letter-spacing:.5px;text-transform:uppercase;
+           color:var(--green);margin-bottom:3px}
+
   footer{display:flex;gap:12px;align-items:center;padding:12px 24px;
          border-top:1px solid var(--line);background:var(--panel)}
   button{font:inherit;font-size:15px;padding:11px 22px;border-radius:9px;cursor:pointer;
@@ -358,6 +379,19 @@
     <section class="card">
       <h2>1 · Pick a document</h2>
       <div id="docs"></div>
+
+      <!-- Operator-only: add a case file to the records repository. The
+           intake agent (its own model, on the records node) catalogues it. -->
+      <div class="upbox">
+        <div class="uplbl">Operator — add a case file</div>
+        <div class="uprow">
+          <input type="file" id="upfile" accept=".md,.txt,.text,text/plain,text/markdown">
+          <button class="upbtn" id="upbtn">Choose a document…</button>
+          <span class="upname" id="upname">no file chosen</span>
+        </div>
+        <div class="upstat" id="upstat">Markdown or plain text. The intake agent
+          reads it and proposes questions.</div>
+      </div>
       <h2 style="margin-top:14px">2 · Pick a question</h2>
       <div id="qs"></div>
       <div class="askbox">
@@ -567,6 +601,62 @@ const QUESTIONS = [
   "What does this document NOT tell me that I would need to know?"
 ];
 let DOC=null, Q=QUESTIONS[0], busy=false, CUSTOM=null;
+let UPLOADED={};          // id -> {summary, questions, by} from /api/state
+let FRESH=null;           // id of the document catalogued most recently
+
+// ---- operator upload -----------------------------------------------------
+// Reads the file in the BROWSER and posts its text. The document goes to the
+// records repository (which marks it synthetic and writes it to disk); the
+// agent never writes -- its policy grants GET only.
+function upStat(msg, kind){
+  const e=document.getElementById('upstat');
+  if(e){ e.className='upstat'+(kind?' '+kind:''); e.innerHTML=msg; }
+}
+
+async function doUpload(file){
+  if(!file) return;
+  if(file.size > 2*1024*1024){ upStat('That file is larger than 2 MB.','err'); return; }
+  const btn=document.getElementById('upbtn');
+  btn.disabled=true;
+  upStat('Reading the document and asking the intake agent… '
+        +'<span class="muted">(up to a minute on a long file)</span>');
+  let text='';
+  try{ text = await file.text(); }
+  catch(e){ upStat('Could not read that file: '+esc(e),'err'); btn.disabled=false; return; }
+  if(!text.trim() || text.trim().length<80){
+    upStat('That file is too short to catalogue.','err'); btn.disabled=false; return;
+  }
+  const title = file.name.replace(/\.(md|txt|text)$/i,'').replace(/[-_]+/g,' ').trim();
+  try{
+    const r = await fetch('/api/upload',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({title, text})});
+    const d = await r.json();
+    if(!r.ok){ upStat('Upload failed: '+esc(d.detail||d.error||r.status),'err');
+               btn.disabled=false; return; }
+    FRESH = d.id;
+    upStat('Catalogued as <b>'+esc(d.title)+'</b><br>'
+          +'<span class="muted">'+esc(d.by)+'</span>','ok');
+    await load();
+  }catch(e){
+    upStat('Upload failed: '+esc(e),'err');
+  }
+  btn.disabled=false;
+}
+
+function bindUpload(){
+  const b=document.getElementById('upbtn'), f=document.getElementById('upfile'),
+        n=document.getElementById('upname');
+  if(!b||!f||b.dataset.bound) return;
+  b.dataset.bound='1';
+  b.addEventListener('click', ()=>f.click());
+  f.addEventListener('change', ()=>{
+    const file=f.files && f.files[0];
+    if(n) n.textContent = file ? file.name : 'no file chosen';
+    if(file) doUpload(file);
+    f.value='';                      // allow re-picking the same file
+  });
+}
 
 async function load(){
   const s = await (await fetch('/api/state',{cache:'no-store'})).json();
@@ -586,12 +676,18 @@ async function load(){
   document.getElementById('runs').textContent = s.ledger.runs;
   document.getElementById('eg').textContent = s.ledger.bytes_egressed;
 
+  UPLOADED = s.uploaded || {};
   const dd = document.getElementById('docs'); dd.innerHTML='';
   s.documents.forEach((d,i)=>{
     if(!DOC && i===0) DOC=d.id;
+    const up = UPLOADED[d.id];
     const el=document.createElement('div');
-    el.className='doc'+(d.id===DOC?' sel':'');
-    el.innerHTML=`<div class="t">${d.title}</div><div class="m">${d.words} words · synthetic</div>`;
+    el.className='doc'+(d.id===DOC?' sel':'')+(d.id===FRESH?' fresh':'');
+    // The summary is shown ONLY when the intake agent actually produced one.
+    el.innerHTML=`<div class="t">${esc(d.title)}`
+      + (up?'<span class="badge">new</span>':'') + `</div>`
+      + `<div class="m">${d.words} words · synthetic</div>`
+      + (up && up.summary ? `<div class="sum">${esc(up.summary)}</div>` : '');
     el.addEventListener('click',()=>{DOC=d.id;load();});
     dd.appendChild(el);
   });
@@ -604,6 +700,17 @@ async function load(){
     el.addEventListener('click',()=>{Q=CUSTOM;load();});
     qq.appendChild(el);
   }
+  // Questions the intake agent proposed for the SELECTED document. Each was
+  // checked against that document's own text before being offered, so a
+  // suggestion the corpus cannot answer never reaches the screen.
+  const sug = (UPLOADED[DOC] && UPLOADED[DOC].questions) || [];
+  sug.forEach(q=>{
+    const el=document.createElement('div');
+    el.className='q sug'; el.style.borderColor = (q===Q?'var(--green)':'');
+    el.innerHTML='<span class="qtag">suggested for this document</span>'+esc(q);
+    el.addEventListener('click',()=>{Q=q;load();});
+    qq.appendChild(el);
+  });
   QUESTIONS.forEach(q=>{
     const el=document.createElement('div');
     el.className='q'; el.style.borderColor = (q===Q?'var(--green)':'');
@@ -612,7 +719,7 @@ async function load(){
     qq.appendChild(el);
   });
   if(s.egress_proof && Object.keys(s.egress_proof).length) paintProof(s.egress_proof);
-  bindAsk(); bindGrip();
+  bindAsk(); bindGrip(); bindUpload();
 }
 
 function paintProof(p){

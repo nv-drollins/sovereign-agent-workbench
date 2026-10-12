@@ -12,11 +12,11 @@ Run on the node that hosts the sandbox + model.
 """
 from __future__ import annotations
 
-import asyncio, json, os, re, shlex, subprocess, time, uuid
+import asyncio, json, os, re, shlex, subprocess, time, urllib.error, urllib.request, uuid
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 
 SANDBOX = os.environ.get("BOOTH_SANDBOX", "sovereign-agent")
@@ -71,6 +71,8 @@ class Booth:
     bytes_egressed: int = 0       # structurally zero; we prove it, not claim it
     model_id: str = ""
     sandbox_info: dict = field(default_factory=dict)
+    # Documents catalogued at the booth this session: id -> {summary, questions}
+    uploaded: dict = field(default_factory=dict)
 
 
 S = Booth()
@@ -164,14 +166,35 @@ def collect_telemetry(max_age: float = 3.0) -> list[dict]:
     return nodes
 
 
+_docs_cache: dict = {"t": 0.0, "docs": []}
+
+
 def list_docs() -> list[dict]:
+    """The catalogue, read from the RECORDS REPOSITORY -- the authority.
+
+    The booth node has its own copy of the seed documents, but an upload is
+    written on the records node. Listing the local folder would catalogue a
+    new document everywhere except the picker the visitor actually uses.
+    Falls back to the local folder only if the repository is unreachable, so
+    the booth still shows something when the records node is down.
+    """
+    if time.time() - _docs_cache["t"] < 2.0 and _docs_cache["docs"]:
+        return _docs_cache["docs"]
     out = []
-    if DOCS.is_dir():
+    if RECORDS_HOST:
+        try:
+            with urllib.request.urlopen(f"{RECORDS_URL}/api/docs", timeout=6) as r:
+                out = [{"id": d["id"], "title": d["title"], "words": d["words"]}
+                       for d in json.load(r).get("documents", [])]
+        except Exception:
+            out = []
+    if not out and DOCS.is_dir():
         for f in sorted(DOCS.glob("*.md")):
             head = f.read_text(errors="ignore").splitlines()
             title = next((l.lstrip("# ").strip() for l in head if l.startswith("#")), f.stem)
             out.append({"id": f.stem, "title": title,
                         "words": len(" ".join(head).split())})
+    _docs_cache.update({"t": time.time(), "docs": out})
     return out
 
 
@@ -306,6 +329,7 @@ async def state():
         "topology": os.environ.get("BOOTH_TOPOLOGY", ""),
         "sandbox": S.sandbox_info,
         "documents": list_docs(),
+        "uploaded": S.uploaded,
         "nodes": collect_telemetry(),
     }, headers=NOCACHE)
 
@@ -362,6 +386,11 @@ RECORDS_HOST = os.environ.get("BOOTH_RECORDS_HOST", "")
 RECORDS_PORT = os.environ.get("BOOTH_RECORDS_PORT", "8900")
 RECORDS_URL = f"http://{RECORDS_HOST}:{RECORDS_PORT}"
 RECORDS_POLICY = os.environ.get("BOOTH_RECORDS_POLICY", os.path.expanduser("~/booth/records-policy.yaml"))
+# Intake agent (parses an uploaded document). Lives beside the records repo.
+INTAKE_URL = os.environ.get("BOOTH_INTAKE_URL", "")
+# Documents are uploaded BY THE BOOTH APP, never by the agent -- the agent's
+# policy grants GET only. See docservice.ingest().
+UPLOAD_MAX = int(os.environ.get("BOOTH_UPLOAD_MAX", str(2 * 1024 * 1024)))
 
 
 def render_records_policy() -> str:
@@ -461,6 +490,93 @@ async def prove():
     S.egress_proof = res
     await broadcast({"type": "egress", "proof": res})
     return res
+
+
+@app.post("/api/upload")
+async def upload(req: Request):
+    """Operator uploads a document; the intake agent catalogues it.
+
+    Flow, and every step is real:
+      1. the intake agent (its OWN model, on the records node) reads the text
+         and returns a title, a one-line summary and suggested questions
+      2. the booth app POSTs the document to the records repository, which
+         writes it to disk and marks it synthetic on its face
+      3. it appears under "pick a document" and the suggested questions appear
+         beside the type-your-own box
+
+    The AGENT never writes here -- its policy grants GET only. This endpoint
+    runs on the booth node, on the operator's behalf.
+    """
+    raw = await req.body()
+    if not raw or len(raw) > UPLOAD_MAX:
+        raise HTTPException(413, "empty or oversized upload")
+    try:
+        payload = json.loads(raw.decode("utf-8", "replace"))
+    except Exception as e:
+        raise HTTPException(400, f"bad JSON: {e}")
+
+    text = (payload.get("text") or "").strip()
+    title = " ".join((payload.get("title") or "").split())[:120]
+    if len(text) < 80:
+        raise HTTPException(400, "document is too short to be worth cataloguing")
+
+    await broadcast({"type": "phase", "phase": "intake",
+                     "msg": "Reading the uploaded document"})
+    await term(f"$ curl -s {INTAKE_URL or '(intake not configured)'}/api/parse "
+               f"-d @- <<< '<{len(text)} chars>'", "cmd")
+
+    # 1. parse
+    parsed = {}
+    if INTAKE_URL:
+        def _parse():
+            body = json.dumps({"title": title, "text": text}).encode()
+            rq = urllib.request.Request(f"{INTAKE_URL}/api/parse", data=body,
+                                        headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(rq, timeout=300) as r:
+                return json.load(r)
+        try:
+            parsed = await asyncio.to_thread(_parse)
+            await term(f"< catalogued by {parsed.get('by','?')} "
+                       f"in {parsed.get('elapsed','?')}s", "ok")
+        except Exception as e:
+            await term(f"< intake agent unavailable: {str(e)[:90]}", "err")
+            parsed = {}
+    else:
+        await term("< BOOTH_INTAKE_URL not set - storing without a summary", "err")
+
+    # 2. store in the records repository
+    def _store():
+        body = json.dumps({"title": parsed.get("title") or title, "text": text}).encode()
+        rq = urllib.request.Request(f"{RECORDS_URL}/api/docs", data=body,
+                                    headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(rq, timeout=60) as r:
+            return json.load(r)
+    await term(f"$ curl -X POST {RECORDS_URL}/api/docs", "cmd")
+    try:
+        stored = await asyncio.to_thread(_store)
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")[:200]
+        await term(f"< HTTP {e.code} {detail}", "err")
+        raise HTTPException(502, f"records repository refused the document: {detail}")
+    except Exception as e:
+        await term(f"< records repository unreachable: {str(e)[:90]}", "err")
+        raise HTTPException(502, f"records repository unreachable: {e}")
+
+    doc = stored.get("document", {})
+    await term(f"< HTTP/1.1 201 Created   id={doc.get('id')}  "
+               f"{doc.get('words')} words", "ok")
+
+    entry = {
+        "id": doc.get("id"),
+        "title": doc.get("title"),
+        "words": doc.get("words"),
+        "summary": parsed.get("summary", ""),
+        "questions": parsed.get("questions", []),
+        "by": parsed.get("by", "stored without a summary"),
+    }
+    S.uploaded[entry["id"]] = entry
+    await broadcast({"type": "uploaded", "document": entry})
+    return entry
 
 
 @app.get("/api/policy")
