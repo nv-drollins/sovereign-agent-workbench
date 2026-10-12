@@ -66,6 +66,13 @@ def call_model(text: str) -> dict | None:
         "messages": [{"role": "user", "content": PROMPT.format(doc=text[:MAX_CHARS])}],
         "max_tokens": 1200,
         "temperature": 0.2,
+        # SKIP THE REASONING PASS. This is a cataloguing task, not a problem to
+        # solve, and the chain-of-thought is pure latency here. Measured on the
+        # same document: 22.6s / 371 completion tokens with thinking enabled,
+        # 3.9s / 60 tokens without -- and the thinking version LEAKED its own
+        # deliberation into `content` ("We need to summarize in one sentence...")
+        # which would have been shown to a visitor as the summary.
+        "chat_template_kwargs": {"enable_thinking": False},
     }).encode()
     req = urllib.request.Request(f"{MODEL_URL}/chat/completions", data=body,
                                  headers={"Content-Type": "application/json"})

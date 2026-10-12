@@ -115,6 +115,35 @@ was removed and the HTTP code the agent now gets.
 
 ---
 
+## Adding a document at the booth
+
+An operator can upload a case file from the booth screen. The intake agent —
+a **second model instance** on the records node — reads it and returns a title,
+a one-line summary and questions specific to that document; the records
+repository then writes it to disk, marked synthetic on its face.
+
+```
+choose a file  ->  intake agent catalogues it (~8 s)  ->  stored + listed
+```
+
+Uploaded documents carry an **added here** badge and a **remove** control that
+deletes the file from the records repository, not just from the list. The three
+seed documents have no remove control and the repository refuses to delete
+them, so the known-good corpus survives an event.
+
+The agent never writes. Its policy grants `GET` on `/api/docs` and
+`/api/docs/*` only — verified from inside the sandbox:
+
+```
+GET    /api/docs -> 200      POST   /api/docs -> 403
+DELETE /api/docs/<id> -> 403
+```
+
+If the intake model is unavailable the upload still succeeds, catalogued by a
+deterministic parser and labelled as such — never a fabricated summary.
+
+---
+
 ## Verification
 
 Nothing here is assumed to work because it started.

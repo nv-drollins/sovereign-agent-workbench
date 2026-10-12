@@ -34,3 +34,12 @@ MAX_LEN=16384
 GPU_UTIL=0.90
 PORT=8000
 IMAGE=vllm/vllm-openai:latest
+
+# Intake model (OPTIONAL): a second, single-node model that catalogues
+# documents uploaded at the booth. Leave INTAKE_MODEL_DIR empty to skip it --
+# uploads then fall back to a deterministic parser and questions still work.
+# 0.42 util on a 75 GiB checkpoint left no room for KV cache and the engine
+# refused to start; 0.80 on a 121 GiB node is correct.
+INTAKE_MODEL_DIR=
+INTAKE_GPU_UTIL=0.80
+INTAKE_MAXLEN=16384

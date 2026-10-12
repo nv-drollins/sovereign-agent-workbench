@@ -184,7 +184,10 @@ def list_docs() -> list[dict]:
     if RECORDS_HOST:
         try:
             with urllib.request.urlopen(f"{RECORDS_URL}/api/docs", timeout=6) as r:
-                out = [{"id": d["id"], "title": d["title"], "words": d["words"]}
+                out = [{"id": d["id"], "title": d["title"], "words": d["words"],
+                        # Only uploads can be deleted; the UI uses this to decide
+                        # whether to offer a remove control.
+                        "uploaded": bool(d.get("uploaded"))}
                        for d in json.load(r).get("documents", [])]
         except Exception:
             out = []
@@ -577,6 +580,41 @@ async def upload(req: Request):
     S.uploaded[entry["id"]] = entry
     await broadcast({"type": "uploaded", "document": entry})
     return entry
+
+
+@app.delete("/api/documents/{doc_id}")
+async def delete_document(doc_id: str):
+    """Remove an uploaded case file from the records repository.
+
+    Operator path, same as upload: the booth app issues the DELETE, never the
+    agent (whose policy grants GET only). The repository refuses to delete a
+    SEED document, so the demo's known-good corpus cannot be cleared out mid
+    event.
+    """
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", doc_id or ""):
+        raise HTTPException(400, "bad document id")
+
+    def _delete():
+        rq = urllib.request.Request(f"{RECORDS_URL}/api/docs/{doc_id}", method="DELETE")
+        with urllib.request.urlopen(rq, timeout=30) as r:
+            return json.load(r)
+
+    await term(f"$ curl -X DELETE {RECORDS_URL}/api/docs/{doc_id}", "cmd")
+    try:
+        await asyncio.to_thread(_delete)
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", "replace")[:200]
+        await term(f"< HTTP {e.code} {detail}", "err")
+        raise HTTPException(e.code if e.code in (403, 404) else 502, detail)
+    except Exception as e:
+        await term(f"< records repository unreachable: {str(e)[:90]}", "err")
+        raise HTTPException(502, f"records repository unreachable: {e}")
+
+    await term(f"< HTTP/1.1 200 OK   removed {doc_id}", "ok")
+    S.uploaded.pop(doc_id, None)
+    _docs_cache["t"] = 0.0          # force the catalogue to re-read
+    await broadcast({"type": "removed", "id": doc_id})
+    return {"deleted": doc_id}
 
 
 @app.get("/api/policy")

@@ -43,15 +43,28 @@ MAX_UPLOAD = int(os.environ.get("DOCSVC_MAX_BYTES", str(2 * 1024 * 1024)))
 AUDIT: list[dict] = []
 
 
+SYNTHETIC_BANNER = "**SYNTHETIC DOCUMENT — uploaded for demonstration. Not real data.**"
+# Written into uploaded files so "is this an upload?" survives a restart. The
+# in-memory flag alone would make yesterday's uploads look like seed documents
+# and therefore undeletable.
+UPLOAD_MARK = "<!-- booth-upload -->"
+
+
 def load():
     out = {}
     for f in sorted(DOCS.glob("*.md")):
         text = f.read_text(errors="ignore")
-        title = next((l.lstrip("# ").strip() for l in text.splitlines()
+        is_upload = UPLOAD_MARK in text[:200]
+        # Strip the marker from the served text: it is bookkeeping, and the
+        # agent should receive the document, not our metadata.
+        clean = text.replace(UPLOAD_MARK + "\n", "", 1).replace(UPLOAD_MARK, "", 1)
+        title = next((l.lstrip("# ").strip() for l in clean.splitlines()
                       if l.startswith("#")), f.stem)
-        out[f.stem] = {"id": f.stem, "title": title, "text": text,
-                       "words": len(text.split()),
-                       "classification": "SYNTHETIC — demonstration only"}
+        out[f.stem] = {"id": f.stem, "title": title, "text": clean,
+                       "words": len(clean.split()),
+                       "classification": "SYNTHETIC — uploaded for demonstration"
+                                         if is_upload else "SYNTHETIC — demonstration only",
+                       "uploaded": f.stat().st_mtime if is_upload else None}
     return out
 
 
@@ -82,7 +95,6 @@ def unique_id(base: str) -> str:
     return cand
 
 
-SYNTHETIC_BANNER = "**SYNTHETIC DOCUMENT — uploaded for demonstration. Not real data.**"
 
 
 def ingest(title: str, text: str) -> dict:
@@ -111,8 +123,12 @@ def ingest(title: str, text: str) -> dict:
         body = f"# {title}\n\n{body}"
 
     doc_id = unique_id(slugify(title))
-    (DOCS / f"{doc_id}.md").write_text(body)
+    # The marker goes on DISK only; `body` stays clean for serving.
+    (DOCS / f"{doc_id}.md").write_text(f"{UPLOAD_MARK}\n{body}")
 
+    # Serve the CLEAN body, exactly as load() does. Storing the marked text
+    # here leaked "<!-- booth-upload -->" as the first line of the document
+    # the agent reads, until the next service restart re-read it from disk.
     LIB[doc_id] = {"id": doc_id, "title": title, "text": body,
                    "words": len(body.split()),
                    "classification": "SYNTHETIC — uploaded for demonstration",
@@ -172,6 +188,35 @@ class H(BaseHTTPRequestHandler):
             return self._send(400, json.dumps({"error": f"could not parse upload: {e}"}))
         return self._send(201, json.dumps({"document": entry}))
 
+    def do_DELETE(self):
+        """Remove an uploaded case file. Operator path only, like ingest.
+
+        SEED DOCUMENTS ARE PROTECTED. The three shipped case files are the
+        demo's known-good corpus; deleting one mid-event leaves a booth with
+        nothing recognisable to show and no way back without a redeploy.
+        Only documents uploaded at the booth can be removed.
+        """
+        m = re.match(r"^/api/docs/([A-Za-z0-9._-]+)$", self.path.split("?")[0])
+        if not m:
+            return self._send(404, json.dumps({"error": "not found"}))
+        doc_id = m.group(1)
+        d = LIB.get(doc_id)
+        if not d:
+            audit(self._who(), "delete", doc_id, False)
+            return self._send(404, json.dumps({"error": "no such document"}))
+        if not d.get("uploaded"):
+            audit(self._who(), "delete", doc_id, False)
+            return self._send(403, json.dumps({
+                "error": "seed documents cannot be deleted; only uploads can"}))
+        try:
+            (DOCS / f"{doc_id}.md").unlink(missing_ok=True)
+        except Exception as e:
+            audit(self._who(), "delete", doc_id, False)
+            return self._send(500, json.dumps({"error": f"could not remove file: {e}"}))
+        LIB.pop(doc_id, None)
+        audit("operator (booth)", "delete", doc_id, True)
+        return self._send(200, json.dumps({"deleted": doc_id}))
+
     def do_GET(self):
         p = self.path.split("?")[0]
 
@@ -181,7 +226,7 @@ class H(BaseHTTPRequestHandler):
         if p == "/api/docs":
             audit(self._who(), "list", "-", True)
             return self._send(200, json.dumps({"documents": [
-                {k: v[k] for k in ("id", "title", "words", "classification")}
+                {k: v.get(k) for k in ("id", "title", "words", "classification", "uploaded")}
                 for v in LIB.values()]}))
 
         m = re.match(r"^/api/docs/([A-Za-z0-9._-]+)$", p)

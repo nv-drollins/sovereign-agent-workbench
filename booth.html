@@ -348,6 +348,12 @@
               text-transform:uppercase;color:var(--green);border:1px solid var(--green-dim);
               border-radius:999px;padding:1px 7px;margin-left:6px;vertical-align:1px}
   .doc .sum{font-size:11.5px;color:var(--muted);margin-top:4px;line-height:1.4}
+  .doc{position:relative}
+  .doc .del{position:absolute;top:7px;right:7px;border:1px solid var(--line);
+            background:#0f1711;color:var(--muted);border-radius:6px;
+            font-size:11px;line-height:1;padding:4px 7px;cursor:pointer}
+  .doc .del:hover{border-color:var(--red);color:var(--red)}
+  .doc .del:disabled{opacity:.4;cursor:not-allowed}
   .q.sug{border-style:dashed}
   .q .qtag{display:block;font-size:9.5px;letter-spacing:.5px;text-transform:uppercase;
            color:var(--green);margin-bottom:3px}
@@ -644,6 +650,28 @@ async function doUpload(file){
   btn.disabled=false;
 }
 
+// Remove an uploaded case file. Deletes it from the RECORDS REPOSITORY --
+// the file on disk, not just this list -- so the catalogue the agent reads
+// shrinks too. Seed documents have no remove control.
+async function removeDoc(id, title, btn){
+  if(!confirm('Remove "'+title+'" from the records repository?\n\n'
+             +'This deletes the document itself, not just this list.')) return;
+  if(btn){ btn.disabled=true; btn.textContent='removing…'; }
+  try{
+    const r = await fetch('/api/documents/'+encodeURIComponent(id),{method:'DELETE'});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok){ upStat('Could not remove it: '+esc(d.detail||d.error||r.status),'err');
+               if(btn){ btn.disabled=false; btn.textContent='remove'; } return; }
+    if(DOC===id) DOC=null;            // do not leave a deleted doc selected
+    if(FRESH===id) FRESH=null;
+    upStat('Removed <b>'+esc(title)+'</b> from the records repository.','ok');
+    await load();
+  }catch(e){
+    upStat('Could not remove it: '+esc(e),'err');
+    if(btn){ btn.disabled=false; btn.textContent='remove'; }
+  }
+}
+
 function bindUpload(){
   const b=document.getElementById('upbtn'), f=document.getElementById('upfile'),
         n=document.getElementById('upname');
@@ -685,10 +713,16 @@ async function load(){
     el.className='doc'+(d.id===DOC?' sel':'')+(d.id===FRESH?' fresh':'');
     // The summary is shown ONLY when the intake agent actually produced one.
     el.innerHTML=`<div class="t">${esc(d.title)}`
-      + (up?'<span class="badge">new</span>':'') + `</div>`
+      + (d.uploaded?'<span class="badge">added here</span>':'') + `</div>`
       + `<div class="m">${d.words} words · synthetic</div>`
-      + (up && up.summary ? `<div class="sum">${esc(up.summary)}</div>` : '');
+      + (up && up.summary ? `<div class="sum">${esc(up.summary)}</div>` : '')
+      // Seed documents have no remove control: the repository refuses to
+      // delete them, so offering a button that always fails is worse than
+      // not offering one.
+      + (d.uploaded ? `<button class="del" title="remove from the records repository">remove</button>` : '');
     el.addEventListener('click',()=>{DOC=d.id;load();});
+    const del = el.querySelector('.del');
+    if(del) del.addEventListener('click', ev=>{ ev.stopPropagation(); removeDoc(d.id, d.title, del); });
     dd.appendChild(el);
   });
   const qq=document.getElementById('qs'); qq.innerHTML='';

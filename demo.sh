@@ -25,6 +25,13 @@ RECORDS_NODE="${RECORDS_NODE:-$VERIFY_NODE}"
 BOOTH_NODE="${BOOTH_NODE:-$HEAD}"
 WATCHDOG_NODE="${WATCHDOG_NODE:-$VERIFY_NODE}"
 INTAKE_NODE="${INTAKE_NODE:-$RECORDS_NODE}"
+INTAKE_MODEL_PORT="${INTAKE_MODEL_PORT:-8001}"
+INTAKE_MODEL_NAME="${INTAKE_MODEL_NAME:-intake-model}"
+INTAKE_MODEL_DIR="${INTAKE_MODEL_DIR:-${MODEL_DIR:-}}"
+# 75 GiB of weights on a 121 GiB node: 0.42 left nothing for KV cache and the
+# engine refused to start ("No available memory for the cache blocks").
+INTAKE_GPU_UTIL="${INTAKE_GPU_UTIL:-0.80}"
+INTAKE_MAXLEN="${INTAKE_MAXLEN:-16384}"
 MODEL_FABRIC_IP="${MODEL_FABRIC_IP:-}"
 SBX="${SBX:-sovereign-agent}"
 TOPOLOGY="${BOOTH_TOPOLOGY:-2 Sparks (TP=2)}"
@@ -44,6 +51,23 @@ hr(){   printf '\n\033[1m%s\033[0m\n' "$*"; }
 _phase(){ on "$BOOTH_NODE" "openshell sandbox list 2>/dev/null | grep '^$SBX '" 2>/dev/null \
           | sed 's/\x1b\[[0-9;]*m//g' | tr -s ' ' | rev | cut -d' ' -f1 | rev | tr -d '[:space:]'; }
 _http(){ on "$1" "curl -s -o /dev/null -w '%{http_code}' --max-time 5 $2" 2>/dev/null; }
+
+# The intake model is a SECOND, single-node model instance -- it is what makes
+# the upload beat work without competing with the booth's answer path on the
+# TP=2 cluster. Optional by design: if it will not start, questions still work.
+start_intake_model(){
+  [ -n "$INTAKE_MODEL_DIR" ] || { warn "INTAKE_MODEL_DIR unset - skipping the intake model"; return 0; }
+  if [ "$(_http "$INTAKE_NODE" "http://127.0.0.1:$INTAKE_MODEL_PORT/v1/models")" = "200" ]; then
+    ok "intake model already serving on ${INTAKE_NODE%%.*}"
+    return 0
+  fi
+  inf "starting the intake model on ${INTAKE_NODE%%.*} (loads in ~9 min)"
+  MAXLEN="$INTAKE_MAXLEN" CONTAINER=vllm-single \
+    bash "$HERE/serve-single.sh" start "$INTAKE_NODE" "$INTAKE_MODEL_DIR" \
+      "$INTAKE_MODEL_NAME" "$INTAKE_MODEL_PORT" "$INTAKE_GPU_UTIL" >/dev/null 2>&1 \
+    && inf "intake model launching; the upload beat works once it is ready" \
+    || warn "intake model failed to launch (uploads will use the deterministic parser)"
+}
 
 start_services(){
   on "$RETRIEVAL_NODE" "cd ~/rag && fuser -k 8700/tcp 2>/dev/null; sleep 1; \
@@ -102,6 +126,8 @@ start)
   hr "2/3  model cluster (TP=${TP:-?})"
   bash "$HERE/cluster.sh" start 2>&1 | grep -E "parsers|✓|✗|HEAD|WORKER" | sed 's/^/  /'
   inf "model loads in ~8 min; services start now and connect when it is ready"
+  # Launched here so it loads IN PARALLEL with the cluster rather than after it.
+  start_intake_model
   hr "3/3  services"
   start_services; sleep 8
   ok "retrieval, verifier, records repo, watchdog, booth app"
@@ -135,6 +161,7 @@ recover)
   if [ "$(_http "$HEAD" "http://127.0.0.1:${PORT:-8000}/v1/models")" = "200" ]; then
     ok "model already serving — leaving it alone"
     inf "restarting the support services only"
+    start_intake_model
     start_services; sleep 8
   else
     inf "model is down — starting cluster + services"
