@@ -87,6 +87,34 @@ Bundle is ~90 GB (9 GB image + ~80 GB weights). A 128 GB stick is enough.
 
 ---
 
+## Attract loop (the idle screen)
+
+After **10 minutes** of no interaction the booth screen runs itself. Any touch,
+key or click dismisses it, and it never covers a run in flight.
+
+The copy is **editable without touching code**: edit `slides.json` on the booth
+node (`~/booth/slides.json`). The screen picks up changes within ~20 seconds —
+no page reload, no restart. A malformed file is ignored and the built-in slides
+are used instead, so a typo at the booth cannot blank the screen.
+
+```bash
+# which is live right now:
+curl -s http://<booth-node>:8500/api/slides | head -c 200
+#   "source":"slides.json"   -> your file
+#   "source":"built-in (slides.json error: ...)"  -> your file has a typo
+```
+
+Slide `type` values: `headline`, `steps`, `facts`, `quote`, `nodes`. The `quote`
+slide is skipped automatically until the booth has produced a real answer — it
+is never filled with a canned example. `nodes` is drawn live from telemetry.
+
+Clicking the **padlock** on the diagram opens a read-only view of the policy
+actually in force: the rendered YAML and the gateway's live preset list. The
+content differs by state — granted shows the policy in force, revoked shows what
+was removed and the HTTP code the agent now gets.
+
+---
+
 ## Verification
 
 Nothing here is assumed to work because it started.

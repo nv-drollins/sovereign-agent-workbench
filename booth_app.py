@@ -463,6 +463,66 @@ async def prove():
     return res
 
 
+@app.get("/api/policy")
+async def policy_view():
+    """What the policy gate is actually enforcing, for the UI's lock popup.
+
+    Read-only. Shows the REAL artifacts: the rendered records policy YAML and
+    the live list of presets the gateway reports as active. When access is
+    revoked the preset is genuinely gone from that list, so the popup reflects
+    the true state rather than a cached copy of what we last wrote.
+    """
+    granted, code = await asyncio.to_thread(_agent_can_read_docs)
+
+    # The rendered YAML -- the exact file handed to `nemoclaw policy-add`.
+    yaml_text = ""
+    try:
+        yaml_text = Path(render_records_policy()).read_text()
+    except Exception as e:
+        yaml_text = f"(policy file unavailable: {e})"
+
+    # Live preset list straight from the gateway.
+    rc, out = await asyncio.to_thread(nemoclaw, [SANDBOX, "policy-list"], 60)
+    active = []
+    for line in (out or "").splitlines():
+        clean = re.sub(r"\x1b\[[0-9;]*m", "", line)
+        if "●" in clean:
+            name = clean.split("●", 1)[1].strip().split()[0]
+            desc = clean.split("—", 1)[1].strip() if "—" in clean else ""
+            active.append({"name": name, "description": desc})
+
+    return JSONResponse({
+        "granted": granted,
+        "http": code,
+        "records_host": RECORDS_HOST,
+        "records_port": RECORDS_PORT,
+        "policy_yaml": yaml_text,
+        "active_presets": active,
+        "preset_name": "records-repository",
+    }, headers=NOCACHE)
+
+
+@app.get("/api/slides")
+async def slides():
+    """Attract-loop copy, loaded from an EDITABLE file on disk.
+
+    Operators edit slides.json next to this app and reload the page -- no code
+    change, no redeploy. Falls back to the built-in slides when the file is
+    missing or malformed, so a typo at the booth cannot blank the screen.
+    """
+    p = Path(__file__).parent / "slides.json"
+    try:
+        data = json.loads(p.read_text())
+        if not isinstance(data, list) or not data:
+            raise ValueError("slides.json must be a non-empty list")
+        return JSONResponse({"slides": data, "source": "slides.json"}, headers=NOCACHE)
+    except FileNotFoundError:
+        return JSONResponse({"slides": None, "source": "built-in"}, headers=NOCACHE)
+    except Exception as e:
+        return JSONResponse({"slides": None, "source": f"built-in (slides.json error: {e})"},
+                            headers=NOCACHE)
+
+
 @app.websocket("/ws")
 async def ws(sock: WebSocket):
     await sock.accept()

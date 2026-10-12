@@ -108,7 +108,7 @@ hr "5/6  project files"
 if [ "$MODE" != "check" ]; then
   # booth app + UI + documents
   on "$APP_NODE" "mkdir -p ~/booth/documents" >/dev/null 2>&1
-  scp -q "$HERE/booth_app.py" "$HERE/booth.html" "nvidia@$APP_NODE:~/booth/" 2>/dev/null
+  scp -q "$HERE/booth_app.py" "$HERE/booth.html" "$HERE/slides.json" "nvidia@$APP_NODE:~/booth/" 2>/dev/null
   scp -q "$HERE"/documents/*.md "nvidia@$APP_NODE:~/booth/documents/" 2>/dev/null
   scp -q "$HERE/model-route.sh" "$HERE/check-booth.py" "nvidia@$APP_NODE:~/booth/" 2>/dev/null
   ok "booth app -> ${APP_NODE%%.*}"

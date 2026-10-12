@@ -1,0 +1,41 @@
+[
+  {
+    "_comment": "ATTRACT-LOOP SLIDES — edit this file, then reload the booth page. No restart needed.",
+    "_comment2": "type: 'headline' | 'steps' | 'facts' | 'quote' | 'nodes'",
+    "_comment3": "A malformed file is IGNORED and the built-in slides are used instead, so a typo at the booth cannot blank the screen. Check which is live at http://<booth>:8500/api/slides",
+    "type": "headline",
+    "title": "Every document, every answer,",
+    "accent": "stays on this desk.",
+    "body": "An AI agent that reads sensitive documents and answers with every claim quoted — running entirely on the hardware in front of you."
+  },
+  {
+    "type": "steps",
+    "title": "How it works",
+    "steps": [
+      { "label": "1 — RETRIEVE", "text": "The agent requests a case file through a policy gate. Every read is audited." },
+      { "label": "2 — REASON", "text": "A 120-billion-parameter model, split across two machines in this booth, reads the file." },
+      { "label": "3 — CITE", "text": "Every claim comes back in quotes. If the document doesn't say, the agent says so." }
+    ]
+  },
+  {
+    "type": "facts",
+    "title": "It cannot reach",
+    "accent": "what you did not grant it.",
+    "body": "Revoke its access to the records system and the same question returns a refusal — in the agent's own words. It keeps its model. It simply has no permission to read that file.",
+    "facts": [
+      { "value": "403", "label": "enforced, not promised" },
+      { "value": "2s", "label": "to refuse" },
+      { "value": "0", "label": "bytes sent to any cloud", "zero": true }
+    ]
+  },
+  {
+    "type": "quote",
+    "title": "A real answer, from this room",
+    "_comment": "This slide is SKIPPED automatically until the booth has produced a genuine answer. It is never filled with an example."
+  },
+  {
+    "type": "nodes",
+    "title": "Running right now",
+    "_comment": "Node cards and the counters below are pulled live from /api/state."
+  }
+]

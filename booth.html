@@ -299,6 +299,38 @@
   /* Progress of the current slide. A plain linear fill, no pulse. */
   .attract .prog{position:absolute;bottom:0;left:0;height:3px;background:var(--green-dim)}
 
+  /* ---- read-only policy popup (click the lock) ------------------------ */
+  .modal{position:fixed;inset:0;z-index:60;background:rgba(5,8,6,.86);
+         display:none;align-items:center;justify-content:center;padding:40px}
+  .modal.on{display:flex}
+  .modal .sheet{background:var(--panel);border:1px solid var(--line);border-radius:14px;
+                width:min(900px,92vw);max-height:84vh;display:flex;flex-direction:column;
+                box-shadow:0 24px 70px rgba(0,0,0,.6)}
+  .modal .mhead{display:flex;align-items:center;gap:12px;padding:16px 20px;
+                border-bottom:1px solid var(--line)}
+  .modal .mhead .mt{font-size:18px;font-weight:700}
+  .modal .mhead .mstate{font-size:12px;font-weight:700;letter-spacing:.6px;
+                        text-transform:uppercase;padding:4px 11px;border-radius:999px}
+  .modal .mstate.ok{color:var(--green);border:1px solid var(--green-dim);background:#16211a}
+  .modal .mstate.no{color:var(--red);border:1px solid var(--red);background:#1d100f}
+  .modal .mclose{margin-left:auto;padding:7px 15px;font-size:14px}
+  .modal .mbody{padding:16px 20px;overflow-y:auto;min-height:0}
+  .modal .msec{font-size:11px;text-transform:uppercase;letter-spacing:1.2px;
+               color:var(--muted);font-weight:600;margin:4px 0 8px}
+  .modal pre{margin:0 0 16px;background:#070b08;border:1px solid var(--line);
+             border-radius:9px;padding:13px 15px;overflow-x:auto;
+             font:12.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;
+             color:var(--text);white-space:pre}
+  .modal .plist{list-style:none;margin:0 0 14px;padding:0}
+  .modal .plist li{border:1px solid var(--line);border-radius:8px;padding:9px 12px;
+                   margin-bottom:7px;font-size:13.5px}
+  .modal .plist li b{color:var(--green)}
+  .modal .plist li span{color:var(--muted);font-size:12px}
+  .modal .mnote{font-size:12.5px;color:var(--muted);line-height:1.55;margin:0 0 6px}
+  .gate{cursor:pointer}
+  .gate:hover{border-color:var(--green)}
+  .gate .hint{font-size:8.5px;color:var(--muted);letter-spacing:.2px;margin-top:1px}
+
   footer{display:flex;gap:12px;align-items:center;padding:12px 24px;
          border-top:1px solid var(--line);background:var(--panel)}
   button{font:inherit;font-size:15px;padding:11px 22px;border-radius:9px;cursor:pointer;
@@ -376,11 +408,12 @@
             </div>
             <div class="brow">
               <div class="conn" id="link-gate"><span class="cap">must pass</span><span class="brk">✕</span></div>
-              <div class="gate" id="gate">
+              <div class="gate" id="gate" title="click to see the policy">
                 <span class="lock" id="gate-icon">🔓</span>
                 <span class="lbl" id="gate-lbl">allowed</span>
                 <span class="code" id="gate-code"></span>
                 <span class="gsub">policy</span>
+                <span class="hint">click to view</span>
               </div>
               <div class="conn" id="link-doc"><span class="brk">✕</span></div>
               <div class="fbox" id="f-doc">
@@ -510,6 +543,20 @@
 
   <div class="cue"><b>Touch the screen</b> to ask it something</div>
   <div class="prog" id="at-prog"></div>
+</div>
+
+<!-- Read-only policy viewer. Opened by clicking the lock on the diagram.
+     Shows the REAL rendered policy file and the gateway's live preset list,
+     so what a visitor reads here is what is actually enforced. -->
+<div class="modal" id="pmodal">
+  <div class="sheet">
+    <div class="mhead">
+      <span class="mt">Policy gate</span>
+      <span class="mstate" id="pm-state">…</span>
+      <button class="mclose" id="pm-close">Close</button>
+    </div>
+    <div class="mbody" id="pm-body">loading…</div>
+  </div>
 </div>
 
 <script>
@@ -924,11 +971,57 @@ function connect(){
 //    rather than showing a canned example -- a fabricated answer on an idle
 //    screen is the same lie as a fabricated line in the terminal pane.
 //  * It must never hijack a live run or an operator mid-click.
-const ATTRACT_IDLE_MS = 90000;   // idle before it takes over
+const ATTRACT_IDLE_MS = 600000;  // 10 minutes idle before it takes over
 const ATTRACT_SLIDE_MS = 11000;  // per slide
 let atOn=false, atIdx=0, atTimer=null, atProgTimer=null, atLast=Date.now(), atAnswer=null;
+let atSlidesSig=null;            // last slides.json payload we rendered
 
 function atSlides(){ return [...document.querySelectorAll('#attract .slide')]; }
+
+// Build the attract slides from the EDITABLE slides.json. If the file is
+// missing or malformed the server reports slides:null and we keep the markup
+// already in the page, so a typo at the booth cannot blank the screen.
+async function atLoadSlides(){
+  let d;
+  try{ d = await (await fetch('/api/slides',{cache:'no-store'})).json(); }
+  catch(e){ return; }
+  if(!d || !d.slides) return;                 // built-in fallback stays
+  atSlidesSig = JSON.stringify(d.slides);
+  const wrap=document.getElementById('attract');
+  const keep=[wrap.querySelector('.mark'), wrap.querySelector('.cue'),
+              wrap.querySelector('.prog')].filter(Boolean);
+  atSlides().forEach(s=>s.remove());
+  d.slides.forEach((s,i)=>{
+    const el=document.createElement('div');
+    el.className='slide';
+    // The quote slide keeps data-slide="3" because atEligible() uses it to
+    // skip the slide until a genuine answer exists.
+    el.dataset.slide = (s.type==='quote') ? '3' : String(i);
+    let h='';
+    if(s.title) h += '<h2>'+esc(s.title)+(s.accent?'<br><em>'+esc(s.accent)+'</em>':'')+'</h2>';
+    if(s.body)  h += '<p>'+esc(s.body)+'</p>';
+    if(s.type==='steps' && Array.isArray(s.steps)){
+      h += '<div class="steps">'+s.steps.map(t=>
+        '<div class="step"><div class="n">'+esc(t.label)+'</div>'+
+        '<div class="s">'+esc(t.text)+'</div></div>').join('')+'</div>';
+    }
+    if(s.type==='quote'){
+      h += '<div class="quote" id="at-quote">—</div><div class="qsrc" id="at-qsrc"></div>';
+    }
+    if(s.type==='nodes'){ h += '<div class="nodes" id="at-nodes"></div>'; }
+    if(Array.isArray(s.facts) || s.type==='nodes'){
+      const facts = Array.isArray(s.facts) ? s.facts : [
+        {value:'—', label:'model', id:'at-model'},
+        {value:'0', label:'questions answered today', id:'at-runs'},
+        {value:'0', label:'bytes egressed', zero:true}];
+      h += '<div class="facts">'+facts.map(f=>
+        '<div class="fact'+(f.zero?' zero':'')+'"><b'+(f.id?' id="'+f.id+'"':'')+'>'+
+        esc(f.value)+'</b><span>'+esc(f.label)+'</span></div>').join('')+'</div>';
+    }
+    el.innerHTML=h;
+    wrap.insertBefore(el, keep[1]||null);
+  });
+}
 
 // Slide 3 ("a real answer") is only eligible once a genuine answer exists.
 function atEligible(){
@@ -961,6 +1054,19 @@ function atStart(){
   atShowSlide(0);
   clearInterval(atTimer);
   atTimer = setInterval(()=>atShowSlide(atIdx+1), ATTRACT_SLIDE_MS);
+}
+
+// Rebuild the slides from disk periodically, so an operator who edits
+// slides.json sees it on the booth screen WITHOUT reloading the page --
+// and definitely without restarting the app. Cheap: one small GET.
+// Skipped while the overlay is visible so slides never swap mid-view.
+async function atMaybeReloadSlides(){
+  if(atOn) return;
+  try{
+    const d = await (await fetch('/api/slides',{cache:'no-store'})).json();
+    const sig = JSON.stringify(d.slides);
+    if(sig !== atSlidesSig){ atSlidesSig = sig; await atLoadSlides(); }
+  }catch(e){ /* leave the current slides in place */ }
 }
 
 function atStop(){
@@ -1030,7 +1136,82 @@ function atTick(){
   window.addEventListener(ev, atPoke, {passive:true}));
 setInterval(atTick, 3000);
 
-connect(); load(); tele(); refreshAccess(); setInterval(load, 15000); setInterval(tele, 2500); setInterval(refreshAccess, 20000);
+// ---- policy popup (click the lock) ---------------------------------------
+// Read-only. Content differs by STATE: granted shows the policy that is in
+// force; revoked shows what was removed and why the request now 403s.
+// Everything rendered comes from /api/policy -- the rendered YAML and the
+// gateway's own preset list, not a copy we keep in the page.
+function esc(s){ return String(s==null?'':s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+async function openPolicy(){
+  const m=document.getElementById('pmodal'), b=document.getElementById('pm-body'),
+        st=document.getElementById('pm-state');
+  if(!m) return;
+  atPoke();                        // viewing the policy counts as activity
+  m.classList.add('on');
+  b.innerHTML='<div class="mnote">reading the live policy…</div>';
+  st.textContent='…'; st.className='mstate';
+  let d;
+  try{ d = await (await fetch('/api/policy',{cache:'no-store'})).json(); }
+  catch(e){ b.innerHTML='<div class="mnote">Could not read the policy: '+esc(e)+'</div>'; return; }
+
+  st.textContent = d.granted ? 'allowed' : 'blocked';
+  st.className = 'mstate ' + (d.granted ? 'ok' : 'no');
+
+  const target = esc(d.records_host)+':'+esc(d.records_port);
+  let html = '';
+
+  if(d.granted){
+    html += '<div class="mnote">The agent may read case files from the records '
+          + 'repository at <b>'+target+'</b>. Only these exact routes are permitted — '
+          + 'anything else, including any write, is refused by the gateway.</div>';
+    html += '<div class="msec">Policy in force — records-repository</div>';
+    html += '<pre>'+esc(d.policy_yaml)+'</pre>';
+  } else {
+    html += '<div class="mnote">The <b>records-repository</b> policy has been '
+          + '<b style="color:var(--red)">removed</b>. The agent\'s request to '
+          + '<b>'+target+'</b> is refused by the gateway with '
+          + '<b>HTTP '+esc(d.http)+'</b> before it ever reaches the records service.</div>';
+    html += '<div class="mnote">Its reasoning model is untouched — it can still think, '
+          + 'it simply has no permission to read that document.</div>';
+    html += '<div class="msec">The policy that is NOT currently applied</div>';
+    html += '<pre>'+esc(d.policy_yaml)+'</pre>';
+  }
+
+  html += '<div class="msec">Presets the gateway reports as active</div>';
+  if(d.active_presets && d.active_presets.length){
+    html += '<ul class="plist">';
+    for(const p of d.active_presets)
+      html += '<li><b>'+esc(p.name)+'</b><br><span>'+esc(p.description)+'</span></li>';
+    html += '</ul>';
+  } else {
+    html += '<div class="mnote">(none reported)</div>';
+  }
+  html += '<div class="mnote">This list is read live from the gateway. '
+        + 'Package-registry presets installed by onboarding (pypi, npm, brew, '
+        + 'huggingface) have been removed — the agent reaches the records '
+        + 'repository and the local model, and nothing else.</div>';
+  b.innerHTML = html;
+}
+
+function closePolicy(){
+  const m=document.getElementById('pmodal');
+  if(m) m.classList.remove('on');
+}
+
+function bindPolicyModal(){
+  const g=document.getElementById('gate'), c=document.getElementById('pm-close'),
+        m=document.getElementById('pmodal');
+  if(g && !g.dataset.bound){ g.dataset.bound='1'; g.addEventListener('click', openPolicy); }
+  if(c && !c.dataset.bound){ c.dataset.bound='1'; c.addEventListener('click', closePolicy); }
+  // click the backdrop (not the sheet) to dismiss
+  if(m && !m.dataset.bound){ m.dataset.bound='1';
+    m.addEventListener('click', e=>{ if(e.target===m) closePolicy(); }); }
+}
+window.addEventListener('keydown', e=>{ if(e.key==='Escape') closePolicy(); });
+
+connect(); load(); tele(); refreshAccess(); bindPolicyModal(); atLoadSlides(); setInterval(load, 15000); setInterval(tele, 2500); setInterval(refreshAccess, 20000); setInterval(atMaybeReloadSlides, 20000);
 </script>
 </body>
 </html>

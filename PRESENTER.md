@@ -126,6 +126,10 @@ them on the operator machine:
 nemoclaw sovereign-agent policy-explain
 ```
 
+Or just **click the padlock on the screen** — it opens a read-only view of the
+policy in force, including the live preset list. Do that instead of the terminal
+when a visitor is watching; it makes the same point without a shell.
+
 It prints exactly two active grants: the records repository and the local
 inference endpoint. Worth saying out loud:
 
