@@ -64,6 +64,9 @@
   .hub{display:flex;align-items:stretch;gap:0;width:100%}
   .hub > .fbox{flex:1 1 0;min-width:0;min-height:86px;
                display:flex;flex-direction:column;justify-content:center}
+  /* The sandbox is one box among three columns, not half the diagram. Cap it
+     so the gateway and the branch get their share of the width. */
+  .hub > #f-sbx{flex:0 1 230px}
   /* connector: a line that spans the gap and meets both boxes, with its
      caption sitting ON the line rather than floating below it */
   /* connector: a painted rule that spans the gap, caption sitting on it */
@@ -84,6 +87,38 @@
                border-bottom:8px solid transparent;transition:border-color .35s}
   .conn.on::before{background:var(--green)}
   .conn.on::after{border-left-color:var(--green)}
+  /* Bidirectional hop: arrowhead at BOTH ends. The sandbox and the gateway
+     talk back and forth, and so do the gateway and the model -- a one-way
+     arrow would claim a request/no-response path that isn't what happens. */
+  .conn.bi::before{left:14px;right:14px}
+  .conn.bi .rev{position:absolute;left:0;top:20px;width:0;height:0;
+                border-right:14px solid #33463a;border-top:8px solid transparent;
+                border-bottom:8px solid transparent;transition:border-color .35s}
+  .conn.bi.on .rev{border-right-color:var(--green)}
+
+  /* Two paths branch out of the gateway: one to the model, one through the
+     policy lock to the records repository. Stacked rows, so both read as
+     leaving the SAME box rather than continuing one chain. */
+  .branch{flex:1 1 0;min-width:0;display:flex;flex-direction:column;
+          justify-content:center;gap:10px;position:relative}
+  .branch::before{content:"";position:absolute;left:0;top:22%;bottom:22%;
+                  width:5px;background:#33463a;border-radius:3px}
+  .branch.lit::before{background:var(--green)}
+  .brow{display:flex;align-items:center;gap:0;min-width:0}
+  .brow > .fbox{min-width:0;min-height:70px;
+                display:flex;flex-direction:column;justify-content:center}
+  .brow > .conn{flex:0 0 96px}
+  /* Branch connectors need to be wider than their captions. Measured: at 62px
+     the "reasons on" caption left 7px of visible line and the arrow read as
+     absent -- the same defect the top-level connectors were already fixed for. */
+  /* Keep the two branch rows the SAME shape. Without a cap the model box
+     (alone on its row) stretched to ~690px while the records box shared its
+     row with a gate and a connector -- the rows read as unrelated. */
+  .brow > .fbox{flex:0 1 300px}
+  .fbox.gw{flex:0 0 196px;border-color:var(--green-dim);background:#131d16}
+  /* nowrap stops the title breaking across two lines, but then the box must be
+     wide enough to hold it -- at 172px "OpenShell" was clipped at the border. */
+  .fbox.gw .ft{color:var(--green);font-size:11.5px;white-space:nowrap}
   /* blocked hop: DASHED line, no arrowhead, and a bold break mark */
   .conn.shut::before{background:repeating-linear-gradient(90deg,
                      var(--red) 0 9px, transparent 9px 14px)}
@@ -308,41 +343,59 @@
       <h2>The agent at work</h2>
       <div class="flow">
         <div class="hub">
-          <div class="fbox" id="f-model">
-            <div class="ft">◆ Reasoning model</div>
-            <div class="fs" id="f-model-sub">2 Sparks (TP=2)</div>
-            <div class="fs ok">always reachable</div>
-          </div>
-
-          <div class="conn" id="link-model"><span class="cap">reasons on</span></div>
-
+          <!-- Sandbox FIRST, far left: the agent is the actor, everything
+               else is a resource it reaches THROUGH the gateway. -->
           <div class="fbox centre" id="f-sbx">
             <div class="ft">▣ Agent sandbox</div>
             <div class="fs"><span id="f-sbx-host">—</span></div>
-            <div class="fs">non-root · no DNS · no route out</div>
+            <div class="fs ok">Hermes — protected by NemoClaw</div>
           </div>
 
-          <div class="conn" id="link-gate"><span class="cap">must pass</span><span class="brk">✕</span></div>
+          <!-- Bidirectional: the agent talks to the gateway and the gateway
+               talks back. Nothing leaves the sandbox except through here. -->
+          <div class="conn bi" id="link-gw"><span class="rev"></span><span class="cap">all traffic</span></div>
 
-          <div class="gate" id="gate">
-            <span class="lock" id="gate-icon">🔓</span>
-            <span class="lbl" id="gate-lbl">allowed</span>
-            <span class="code" id="gate-code"></span>
-            <span class="gsub">NemoClaw policy</span>
+          <!-- The gateway is the hub. Measured: every request from the
+               sandbox is forced through this proxy -- the model via
+               CONNECT inference.local:443, the records via a proxied GET. -->
+          <div class="fbox gw" id="f-gw">
+            <div class="ft">⬢ NemoClaw / OpenShell</div>
+            <div class="fs">policy proxy</div>
+            <div class="fs">every request inspected</div>
           </div>
 
-          <div class="conn" id="link-doc"><span class="brk">✕</span></div>
-
-          <div class="fbox" id="f-doc">
-            <div class="ft">▤ Records repository</div>
-            <div class="fs"><span id="f-doc-host">—</span> · :8900</div>
-            <div class="fs">every read audited</div>
+          <!-- Two paths branch from the gateway. -->
+          <div class="branch">
+            <div class="brow">
+              <div class="conn bi" id="link-model"><span class="rev"></span><span class="cap">reasons on</span></div>
+              <div class="fbox" id="f-model">
+                <div class="ft">◆ Reasoning model</div>
+                <div class="fs" id="f-model-sub">2 Sparks (TP=2)</div>
+                <div class="fs ok">always reachable</div>
+              </div>
+            </div>
+            <div class="brow">
+              <div class="conn" id="link-gate"><span class="cap">must pass</span><span class="brk">✕</span></div>
+              <div class="gate" id="gate">
+                <span class="lock" id="gate-icon">🔓</span>
+                <span class="lbl" id="gate-lbl">allowed</span>
+                <span class="code" id="gate-code"></span>
+                <span class="gsub">policy</span>
+              </div>
+              <div class="conn" id="link-doc"><span class="brk">✕</span></div>
+              <div class="fbox" id="f-doc">
+                <div class="ft">▤ Records repository</div>
+                <div class="fs"><span id="f-doc-host">—</span> · :8900</div>
+                <div class="fs">every read audited</div>
+              </div>
+            </div>
           </div>
         </div>
         <div class="flowhead" id="f-head">Model: <span style="color:var(--green)">reachable</span> &nbsp;·&nbsp; Records: <span style="color:var(--green)">allowed &amp; audited</span></div>
         <div class="flowlegend">
-          The agent is the only thing that makes calls — the policy gate sits on
-          the path to the records repository, not on the model.
+          Every call the agent makes is forced through the NemoClaw/OpenShell
+          proxy — nothing reaches the model or the records repository directly.
+          The lock sits only on the path to the <b>documents</b>.
         </div>
         <div class="fnarr" id="f-narr"><span class="muted">idle — pick a document and press Run</span></div>
         <div class="fprog" id="f-prog"><i></i></div>
@@ -581,22 +634,30 @@ async function toggleAccess(){
 // --- live flow diagram -------------------------------------------------
 // Driven by the SAME websocket events as the rest of the UI. Nothing here is
 // on a timer and nothing is faked.
+// RUNNING state. gateSet() is called on every /api/access poll (20s) and would
+// otherwise re-light the whole diagram, erasing the per-phase progression a
+// visitor is supposed to watch. While a run is in flight, gateSet paints the
+// LOCK only; flowPhase owns the boxes and connectors.
+let RUNNING=false;
 function flowSet(id,on){ const e=document.getElementById(id); if(e) e.classList.toggle('on',!!on); }
 function flowNarrate(t){ const n=document.getElementById('f-narr'); if(n) n.innerHTML=t; }
 function flowReset(){
-  ['f-doc','f-sbx','f-model'].forEach(i=>flowSet(i,false));
+  ['f-doc','f-sbx','f-model','f-gw'].forEach(i=>flowSet(i,false));
   document.querySelectorAll('.conn').forEach(e=>e.classList.remove('on','shut'));
+  const b=document.querySelector('.branch'); if(b) b.classList.remove('lit');
   const d=document.getElementById('f-doc'); if(d) d.classList.remove('denied');
   const p=document.getElementById('f-prog'); if(p) p.classList.remove('on');
 }
 function flowPhase(ph){
   if(ph==='reading'){
-    flowSet('f-doc',1);
-    flowNarrate('<b>Requesting the case file</b> <span class="muted">— from the records repository</span>');
+    flowSet('f-doc',1); flowSet('f-sbx',1); flowSet('f-gw',1);
+    flowSet('link-gw',1);
+    flowNarrate('<b>Requesting the case file</b> <span class="muted">— through the NemoClaw policy proxy</span>');
   }
   if(ph==='thinking'){
-    flowSet('f-sbx',1); flowSet('f-model',1);
-    mlink && mlink.classList.add('on');
+    flowSet('f-sbx',1); flowSet('f-model',1); flowSet('f-gw',1);
+    flowSet('link-gw',1); flowSet('link-model',1);
+    const b=document.querySelector('.branch'); if(b) b.classList.add('lit');
     flowNarrate('<b>Reasoning over the file</b> <span class="muted">— on the model sharded across 2 Sparks</span>');
   }
   if(ph==='proving'){
@@ -608,22 +669,35 @@ function gateSet(state, code, narration){
   const g=document.getElementById('gate'), i=document.getElementById('gate-icon'),
         l=document.getElementById('gate-lbl'), c=document.getElementById('gate-code'),
         doc=document.getElementById('f-doc'), sbx=document.getElementById('f-sbx'),
-        mdl=document.getElementById('f-model'),
+        mdl=document.getElementById('f-model'), gw=document.getElementById('f-gw'),
         n=document.getElementById('f-narr'), p=document.getElementById('f-prog');
   if(!g) return;
+  // Only the RECORDS path is ever cut. The sandbox, the gateway and the model
+  // stay connected -- that is the whole "contained, not broken" claim.
   const links=[document.getElementById('link-gate'),
                document.getElementById('link-doc')].filter(Boolean);
   const mlink=document.getElementById('link-model');
+  const gwlink=document.getElementById('link-gw');
   g.classList.remove('open','shut','work');
-  // the sandbox and its model are NEVER what gets cut off
-  sbx && sbx.classList.add('on');
-  mdl && mdl.classList.add('on');
-  mdl && mdl.classList.remove('denied');
-  mlink && mlink.classList.add('on');
+  // While a run is in flight, flowPhase owns the boxes/connectors so the
+  // visitor can watch the request travel. At REST the diagram shows the
+  // topology dimmed with only the LOCK coloured -- otherwise idle and
+  // mid-run look identical and the progression is invisible.
+  if(!RUNNING){
+    sbx && sbx.classList.remove('on');
+    mdl && mdl.classList.remove('on');
+    mdl && mdl.classList.remove('denied');
+    gw && gw.classList.remove('on');
+    mlink && mlink.classList.remove('on');
+    gwlink && gwlink.classList.remove('on');
+    const br=document.querySelector('.branch'); br && br.classList.remove('lit');
+  }
 
   if(state==='open'){ g.classList.add('open'); i.textContent='🔓'; l.textContent='allowed';
-    doc && doc.classList.remove('denied'); doc && doc.classList.add('on');
-    links.forEach(e=>{e.classList.add('on'); e.classList.remove('shut');});
+    doc && doc.classList.remove('denied');
+    if(!RUNNING){ doc && doc.classList.remove('on');
+      links.forEach(e=>e.classList.remove('on','shut')); }
+    else { links.forEach(e=>e.classList.remove('shut')); }
     const dft=doc && doc.querySelector('.ft');
     if(dft) dft.innerHTML='▤ Records repository';
     const hd=document.getElementById('f-head');
@@ -778,6 +852,7 @@ function termLine(d){
 }
 
 function reset(){
+  RUNNING=false;
   busy=false; document.getElementById('run').disabled=false;
   document.getElementById('stage').innerHTML=
     `<div class="idle"><div class="big">Every document, every answer, stays on this desk.</div>
@@ -794,7 +869,7 @@ function connect(){
     const d=JSON.parse(e.data);
     const ph=document.getElementById('ph'), ans=document.getElementById('ans'),
           feed=document.getElementById('feed');
-    if(d.type==='start'){ flowReset(); }
+    if(d.type==='start'){ RUNNING=true; flowReset(); }
     if(d.type==='phase'){ if(ph) ph.textContent=d.msg; flowPhase(d.phase); }
     if(d.type==='tick'&&feed){ const x=document.createElement('div');
       x.textContent='· '+d.msg; feed.appendChild(x); feed.scrollTop=1e6; }
@@ -804,6 +879,7 @@ function connect(){
       if(ans) ans.textContent=d.answer;
       flowSet('f-sbx',1); gateSet('open','', '<b>Answered</b> <span class="muted">— '+
         'the document, the model and the answer all stayed on these machines</span>');
+      RUNNING=false;
       busy=false; document.getElementById('run').disabled=false; load();
       atLast=Date.now(); atRefresh();   // keep the idle screen's quote current
     }
@@ -811,6 +887,7 @@ function connect(){
       if(ph) ph.textContent='That run did not complete';
       document.querySelector('.bar')?.remove();
       if(ans) ans.textContent=d.msg||'';
+      RUNNING=false;
       busy=false; document.getElementById('run').disabled=false;
     }
     if(d.type==='term') termLine(d);
@@ -829,6 +906,7 @@ function connect(){
       if(ph2) ph2.textContent='Blocked by policy — the agent could not read the document';
       document.querySelector('.bar')?.remove();
       if(an2) an2.textContent=d.msg||'';
+      RUNNING=false;
       busy=false; document.getElementById('run').disabled=false;
     }
     if(d.type==='egress'){
