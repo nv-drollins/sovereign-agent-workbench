@@ -242,6 +242,18 @@
   .node .nm .led{width:8px;height:8px;border-radius:50%;background:#2a3a2e}
   .node.busy .nm .led{background:var(--green)}
   .node .role{font-size:11px;color:var(--muted);margin:2px 0 7px}
+  /* What each node is DOING. Kept to short chips so the panel stays scannable
+     -- this is the answer to "which box does what?", the first thing a visitor
+     asks about a multi-machine demo.
+     NEUTRAL, not green: green is already carrying the memory bars and the
+     status LEDs. A vision pass on the rendered panel called the greens
+     indistinguishable, so the chips stay grey and the bars keep the colour. */
+  .node .roles{display:flex;flex-wrap:wrap;gap:4px;margin:4px 0 2px}
+  .node .rolechip{font-size:10px;line-height:1.5;color:var(--text);
+                  background:#17231b;border:1px solid var(--line);
+                  border-radius:999px;padding:1px 8px;white-space:nowrap}
+  /* The PRIMARY role reads first; the rest are context. */
+  .node .rolechip:first-child{color:var(--green);border-color:var(--green-dim)}
   .met{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin-top:7px}
   .met .lbl{width:36px;font-weight:600}
   .met .track{flex:1;display:block;height:14px;background:#13201a;border-radius:7px;
@@ -981,8 +993,13 @@ function paintCluster(nodes){
     const el=document.createElement('div');
     el.className='node'+(busy?' busy':'');
     const role = v ? 'serving the model' : 'idle';
+    // Roles come from the backend, derived from configured placement plus
+    // measured state -- never typed into the UI, or a roster change leaves
+    // the booth screen asserting a role a node no longer has.
+    const roles = (n.roles && n.roles.length) ? n.roles : null;
     el.innerHTML=`
       <div class="nm"><span class="led"></span>${n.host}</div>
+      ${roles ? `<div class="roles">${roles.map(r=>`<span class="rolechip">${esc(r)}</span>`).join('')}</div>` : ''}
       <div class="role">${role} · ${g.temp_c?Math.round(g.temp_c)+'°C':''} ${g.power_w?Math.round(g.power_w)+'W':''}</div>
       <div class="met"><span class="lbl">GPU</span><span class="track">
         <span class="fill" style="width:${g.sm_pct||0}%"></span></span>

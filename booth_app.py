@@ -34,6 +34,10 @@ BOOTH_PROFILE = os.environ.get("BOOTH_PROFILE", "booth")
 # No default roster: a baked-in list points a stranger's clone at this lab.
 # demo.sh exports BOOTH_NODES from net.conf.
 NODES = [n for n in os.environ.get("BOOTH_NODES", "").split(",") if n.strip()]
+# Node NAME of the records repository (BOOTH_RECORDS_HOST is its fabric IP).
+# Used only to label the cluster panel -- no default, so a stranger's clone
+# simply shows no label rather than asserting this lab's layout.
+RECORDS_NODE_NAME = os.environ.get("BOOTH_RECORDS_NODE", "")
 # install.sh deploys this to ~/rag/telemetry.py on every node. NEVER default it
 # into /tmp: a reboot wipes /tmp, every node then reports error:true, and the
 # cluster panel silently renders empty while all other checks stay green.
@@ -149,9 +153,47 @@ def _node_telemetry(host: str) -> dict:
                  f"nvidia@{host}", "python3", TELEMETRY_SCRIPT])
     rc, out = sh(cmd, timeout=25)
     try:
-        return json.loads(out.strip().splitlines()[-1])
+        d = json.loads(out.strip().splitlines()[-1])
     except Exception:
         return {"host": host.split(".")[0], "error": True}
+    d["roles"] = _node_roles(host, d)
+    return d
+
+
+def _short(h: str) -> str:
+    return (h or "").split(".")[0]
+
+
+def _node_roles(host: str, tele: dict) -> list[str]:
+    """What this node is DOING, in words an attendee can read at a glance.
+
+    Derived from the configured placement plus measured state, never
+    hardcoded: a roster change must not leave the booth screen asserting a
+    role a node no longer has. Memory is the honest signal for "holds the
+    model" -- a tensor-parallel worker runs no vLLM process of its own.
+    """
+    h = _short(host)
+    roles: list[str] = []
+    is_intake = bool(INTAKE_URL) and h == _short(INTAKE_URL.split("//")[-1].split(":")[0])
+    holds_model = (tele.get("memory") or {}).get("used_gb", 0) > 60 or bool(tele.get("vllm"))
+    if holds_model and not is_intake:
+        # The booth's answer model is the TP=2 pair. The intake node also
+        # holds ~117G of weights, but they are a DIFFERENT model -- labelling
+        # it "reasoning model" would tell a visitor the cluster is three-way
+        # sharded when it is not.
+        roles.append("reasoning model")
+    if h == _short(RECORDS_NODE_NAME):
+        roles.append("records repository")
+    if is_intake:
+        roles.append("document intake" + (" model" if holds_model else ""))
+    if h == _short(os.environ.get("BOOTH_SELF_NODE", "")):
+        # Only the node that actually hosts the sandbox may claim it. The
+        # OpenShell gateway process runs on all three; saying "NemoClaw" on
+        # every card would be true of the daemon and false of the sandbox.
+        # "booth UI" is dropped: it is the least informative of the three and
+        # wrapped the chip row onto a second line, making that card ragged.
+        roles.append("NemoClaw sandbox")
+    return roles
 
 
 def collect_telemetry(max_age: float = 3.0) -> list[dict]:

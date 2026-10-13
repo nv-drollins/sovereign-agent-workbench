@@ -108,9 +108,12 @@ start_services(){
   # the remote command string means every $( ) runs on the REMOTE side, where
   # NODES is unset -- which silently produced BOOTH_NODES="".
   local _nodes_csv; _nodes_csv="$(echo ${NODES:-} | tr ' ' ',')"
-  printf 'BOOTH_TOPOLOGY="%s"\nBOOTH_RECORDS_HOST="%s"\nBOOTH_NODES="%s"\nBOOTH_SELF_NODE="%s"\nBOOTH_INTAKE_URL="%s"\n' \
+  # BOOTH_RECORDS_HOST is the FABRIC IP the agent fetches through;
+  # BOOTH_RECORDS_NODE is the node NAME, which is what the cluster panel
+  # matches on to label a card.
+  printf 'BOOTH_TOPOLOGY="%s"\nBOOTH_RECORDS_HOST="%s"\nBOOTH_NODES="%s"\nBOOTH_SELF_NODE="%s"\nBOOTH_INTAKE_URL="%s"\nBOOTH_RECORDS_NODE="%s"\n' \
     "$TOPOLOGY" "${RECORDS_FABRIC_IP:-}" "$_nodes_csv" "${BOOTH_NODE%%.*}" \
-    "http://${INTAKE_NODE%%.*}.local:8600" \
+    "http://${INTAKE_NODE%%.*}.local:8600" "${RECORDS_NODE%%.*}" \
     | ssh -o BatchMode=yes -o ConnectTimeout=8 "nvidia@$BOOTH_NODE" \
         "mkdir -p ~/.config/environment.d && cat > ~/.config/environment.d/booth.conf" >/dev/null 2>&1
   on "$BOOTH_NODE" "cd ~/booth && fuser -k 8500/tcp 2>/dev/null; sleep 1; \
