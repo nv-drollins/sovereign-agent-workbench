@@ -347,6 +347,27 @@
   .doc .badge{display:inline-block;font-size:9.5px;letter-spacing:.5px;
               text-transform:uppercase;color:var(--green);border:1px solid var(--green-dim);
               border-radius:999px;padding:1px 7px;margin-left:6px;vertical-align:1px}
+  /* The left card must scroll INTERNALLY: uploads make these lists grow
+     without bound, and a 1080p booth screen cannot show ten case files.
+     max-height ALONE collapses these to ~4px -- the card is a flex column, so
+     a flex child's default min-height:auto plus the siblings' demands leaves
+     them nothing. Give them a flex basis AND a min-height floor. */
+  #docs{overflow-y:auto;flex:1 1 220px;min-height:140px;max-height:34vh;padding-right:4px}
+  #qs{overflow-y:auto;flex:1 1 180px;min-height:120px;max-height:30vh;padding-right:4px}
+  #docs::-webkit-scrollbar,#qs::-webkit-scrollbar{width:9px}
+  #docs::-webkit-scrollbar-track,#qs::-webkit-scrollbar-track{
+    background:#0f1711;border-radius:5px}
+  #docs::-webkit-scrollbar-thumb,#qs::-webkit-scrollbar-thumb{
+    background:#2a3a2e;border-radius:5px}
+  #docs::-webkit-scrollbar-thumb:hover,#qs::-webkit-scrollbar-thumb:hover{
+    background:var(--green-dim)}
+  #docs,#qs{scrollbar-width:thin;scrollbar-color:#2a3a2e #0f1711}
+  /* The left column scrolls as a whole only if its content still overflows. */
+  main > .card:first-child{overflow-y:auto}
+  /* Which document a run actually read -- shown on the result itself. */
+  .srcline{font-size:12px;color:var(--muted);margin:2px 0 8px}
+  .srcline b{color:var(--green);font-weight:600}
+
   .doc .sum{font-size:11.5px;color:var(--muted);margin-top:4px;line-height:1.4}
   .doc{position:relative}
   .doc .del{position:absolute;top:7px;right:7px;border:1px solid var(--line);
@@ -641,7 +662,14 @@ async function doUpload(file){
     if(!r.ok){ upStat('Upload failed: '+esc(d.detail||d.error||r.status),'err');
                btn.disabled=false; return; }
     FRESH = d.id;
-    upStat('Catalogued as <b>'+esc(d.title)+'</b><br>'
+    // SELECT the document we just catalogued. Without this, DOC stayed on
+    // whatever was selected (the first seed) and the very next question ran
+    // against the WRONG document -- the upload succeeded, the answer came
+    // from grant-award, and it read as the agent hallucinating.
+    DOC = d.id;
+    CUSTOM = null;                       // a question about the old doc no longer applies
+    Q = (d.questions && d.questions[0]) || QUESTIONS[0];
+    upStat('Catalogued as <b>'+esc(d.title)+'</b> — now selected<br>'
           +'<span class="muted">'+esc(d.by)+'</span>','ok');
     await load();
   }catch(e){
@@ -706,7 +734,12 @@ async function load(){
 
   UPLOADED = s.uploaded || {};
   const dd = document.getElementById('docs'); dd.innerHTML='';
-  s.documents.forEach((d,i)=>{
+  // Newest uploads FIRST. A document added at the booth appearing at the
+  // bottom of a scrolling list is the thing an operator misses, and missing
+  // it means asking a question about the wrong file.
+  const ordered = [...s.documents].sort((a,b)=>
+    (b.uploaded?1:0)-(a.uploaded?1:0));
+  ordered.forEach((d,i)=>{
     if(!DOC && i===0) DOC=d.id;
     const up = UPLOADED[d.id];
     const el=document.createElement('div');
@@ -725,6 +758,16 @@ async function load(){
     if(del) del.addEventListener('click', ev=>{ ev.stopPropagation(); removeDoc(d.id, d.title, del); });
     dd.appendChild(el);
   });
+  // Keep the selected document visible when the list scrolls -- after an
+  // upload it may be off-screen, and an operator who cannot see what is
+  // selected is the same failure as selecting the wrong thing.
+  const selCard = dd.querySelector('.doc.sel');
+  if(selCard && dd.scrollHeight > dd.clientHeight){
+    const t=selCard.offsetTop, b=t+selCard.offsetHeight;
+    if(t < dd.scrollTop || b > dd.scrollTop + dd.clientHeight){
+      dd.scrollTop = Math.max(0, t - 6);
+    }
+  }
   const qq=document.getElementById('qs'); qq.innerHTML='';
   if(CUSTOM){
     const el=document.createElement('div');
@@ -772,8 +815,13 @@ function paintProof(p){
 async function run(){
   if(busy||!DOC) return;
   busy=true; document.getElementById('run').disabled=true;
+  // Name the document ON the result. A run that silently used the wrong file
+  // is the worst failure this demo has -- it reads as the agent making things
+  // up. Showing the source makes a mismatch impossible to miss.
+  const picked = (document.querySelector('#docs .doc.sel .t')||{}).textContent || DOC;
   const st=document.getElementById('stage');
   st.innerHTML=`<div class="phase"><span class="dot"></span><span id="ph">Starting…</span></div>
+                <div class="srcline">reading <b>${esc(picked.replace('added here',''))}</b></div>
                 <div class="bar"><i></i></div><div class="answer" id="ans"></div>
                 <div class="feed" id="feed"></div>`;
   await fetch(`/api/run?doc=${encodeURIComponent(DOC)}&question=${encodeURIComponent(Q)}`,{method:'POST'});

@@ -36,7 +36,13 @@ PORT = int(os.environ.get("INTAKE_PORT", "8600"))
 MODEL_URL = os.environ.get("INTAKE_MODEL_URL", "http://127.0.0.1:8001/v1")
 MODEL_NAME = os.environ.get("INTAKE_MODEL_NAME", "intake-model")
 TIMEOUT = int(os.environ.get("INTAKE_TIMEOUT", "240"))
-MAX_CHARS = int(os.environ.get("INTAKE_MAX_CHARS", "9000"))
+# A skill or spec file is commonly 20-30k chars. At 9000 the intake agent
+# summarised the first third and proposed questions only about that part,
+# which looks like a bad model rather than a clipped input.
+# CEILING IS THE SERVED CONTEXT, not taste: this model runs --max-model-len
+# 16384, so ~4 chars/token means 28000 chars (~7k tokens) leaves comfortable
+# room for the prompt scaffolding and the 1200-token reply.
+MAX_CHARS = int(os.environ.get("INTAKE_MAX_CHARS", "28000"))
 
 PROMPT = """You are cataloguing a document for a records repository.
 
@@ -170,6 +176,7 @@ def deterministic(title: str, text: str) -> dict:
 
 def parse(title: str, text: str) -> dict:
     t0 = time.time()
+    clipped = len(text) > MAX_CHARS
     out = call_model(text)
     doc_lower = text.lower()
     if isinstance(out, dict) and out.get("summary"):
@@ -181,14 +188,19 @@ def parse(title: str, text: str) -> dict:
             dropped_note = " (model questions were not grounded in the text)"
         else:
             dropped_note = f" ({dropped} ungrounded question(s) dropped)" if dropped else ""
+        # Say it out loud when only part of the document was read.
+        clip_note = (f"; catalogued from the first {MAX_CHARS} of {len(text)} chars"
+                     if clipped else "")
         return {
             "title": " ".join(str(out.get("title") or title).split())[:120] or title,
             "summary": " ".join(str(out["summary"]).split())[:300],
             "questions": kept,
-            "by": f"{MODEL_NAME}{dropped_note}",
+            "by": f"{MODEL_NAME}{dropped_note}{clip_note}",
+            "truncated": clipped,
             "elapsed": round(time.time() - t0, 1),
         }
     d = deterministic(title, text)
+    d["truncated"] = clipped
     d["elapsed"] = round(time.time() - t0, 1)
     return d
 

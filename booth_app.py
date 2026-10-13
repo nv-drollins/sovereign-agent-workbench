@@ -40,6 +40,12 @@ NODES = [n for n in os.environ.get("BOOTH_NODES", "").split(",") if n.strip()]
 TELEMETRY_SCRIPT = os.environ.get("BOOTH_TELEMETRY", os.path.expanduser("~/rag/telemetry.py"))
 DOCS = Path(os.environ.get("BOOTH_DOCS", str(Path(__file__).parent / "documents")))
 
+# How much of a document reaches the model. ~4 chars/token, so 48k chars is
+# ~12k tokens -- comfortable inside the 64k context alongside the answer.
+# A real skill/spec file is 20-30k chars; the old 12k cap cut those in HALF
+# and said nothing, so the agent answered from a fragment.
+DOC_CHAR_LIMIT = int(os.environ.get("BOOTH_DOC_CHARS", "48000"))
+
 # Never cache: a stale booth page silently serves yesterday's UI.
 NOCACHE = {"Cache-Control": "no-store, no-cache, must-revalidate", "Pragma": "no-cache"}
 
@@ -267,7 +273,20 @@ async def run_agent(doc_id: str, question: str):
             text = json.loads("\n".join(lines[:-1])).get("text", "")
         except Exception:
             text = "\n".join(lines[:-1])
-        prompt = AGENT_PROMPT.format(doc=text[:12000], question=question)
+
+        # Silent truncation is a correctness bug on a booth screen: the agent
+        # answers from half a document and nothing says so. The model holds
+        # 64k tokens, so a generous cap fits almost anything an operator
+        # uploads -- and when it does not, SAY SO rather than quietly cutting.
+        doc_text = text
+        truncated = len(text) > DOC_CHAR_LIMIT
+        if truncated:
+            doc_text = text[:DOC_CHAR_LIMIT]
+            await term(f"! document is {len(text)} chars; "
+                       f"sending the first {DOC_CHAR_LIMIT} to the model", "err")
+            await broadcast({"type": "truncated", "chars": len(text),
+                             "sent": DOC_CHAR_LIMIT})
+        prompt = AGENT_PROMPT.format(doc=doc_text, question=question)
 
         run.phase = "thinking"
         await broadcast({"type": "phase", "phase": "thinking",
@@ -568,6 +587,11 @@ async def upload(req: Request):
     doc = stored.get("document", {})
     await term(f"< HTTP/1.1 201 Created   id={doc.get('id')}  "
                f"{doc.get('words')} words", "ok")
+    # Invalidate the catalogue cache NOW. load() runs immediately after this
+    # returns, and a stale 2s cache meant the newly stored document was
+    # missing from the very list that is supposed to show it -- so nothing
+    # could be selected and the next question ran against the old document.
+    _docs_cache["t"] = 0.0
 
     entry = {
         "id": doc.get("id"),
