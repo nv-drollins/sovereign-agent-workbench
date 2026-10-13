@@ -1129,6 +1129,9 @@ function connect(){
     if(d.type==='answer'){
       if(ph) ph.textContent=`Answered in ${d.elapsed}s — entirely on this machine`;
       document.querySelector('.bar')?.remove();
+      // Clear the heartbeat ticks: a "Locating relevant passages…" line left
+      // sitting under a finished answer reads as a run still in progress.
+      if(feed) feed.innerHTML='';
       if(ans) ans.textContent=d.answer;
       flowSet('f-sbx',1); gateSet('open','', '<b>Answered</b> <span class="muted">— '+
         'the document, the model and the answer all stayed on these machines</span>');
